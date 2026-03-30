@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Secrets (unencrypted)
+secrets/*.yaml
+!secrets/*.enc.yaml
+!secrets/.sops.yaml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+dist/
+build/
+.next/
+*.egg-info/
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Claude Code credentials
+.claude/settings.local.json
