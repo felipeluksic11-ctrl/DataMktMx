@@ -1,0 +1,136 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["public", "raw"]
+}
+
+model Portal {
+  id            String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name          String      @unique @db.VarChar(100)
+  slug          String      @unique @db.VarChar(50)
+  baseUrl       String      @map("base_url")
+  scraperModule String      @map("scraper_module") @db.VarChar(100)
+  isActive      Boolean     @default(true) @map("is_active")
+  avgListings   Int?        @map("avg_listings")
+  notes         String?
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  scrapeJobs    ScrapeJob[]
+  workPlans     WorkPlan[]
+
+  @@map("portals")
+  @@schema("public")
+}
+
+model ScrapeJob {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portalId     String    @map("portal_id") @db.Uuid
+  status       String    @default("pending") @db.VarChar(20)
+  totalScraped Int       @default(0) @map("total_scraped")
+  totalNew     Int       @default(0) @map("total_new")
+  totalUpdated Int       @default(0) @map("total_updated")
+  totalErrors  Int       @default(0) @map("total_errors")
+  errorDetail  String?   @map("error_detail")
+  metadata     Json?
+  startedAt    DateTime? @map("started_at") @db.Timestamptz
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  portal       Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+
+  @@map("scrape_jobs")
+  @@schema("public")
+}
+
+model WorkPlan {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portalId          String    @map("portal_id") @db.Uuid
+  operation         String    @db.VarChar(20)
+  status            String    @default("draft") @db.VarChar(20)
+  totalListings     Int       @default(0) @map("total_listings")
+  totalPages        Int       @default(0) @map("total_pages")
+  statesCount       Int       @default(0) @map("states_count")
+  antiBotLevel      String    @default("none") @map("anti_bot_level") @db.VarChar(10)
+  selectorsHealthy  Boolean   @default(true) @map("selectors_healthy")
+  scoutReport       Json?     @map("scout_report")
+  numWorkers        Int       @default(1) @map("num_workers")
+  visitDetail       Boolean   @default(true) @map("visit_detail")
+  workerAssignments Json?     @map("worker_assignments")
+  proxyProvider     String?   @map("proxy_provider") @db.VarChar(30)
+  estimatedHours    Float     @default(0) @map("estimated_hours")
+  estimatedCostUsd  Float     @default(0) @map("estimated_cost_usd")
+  actualHours       Float?    @map("actual_hours")
+  actualCostUsd     Float?    @map("actual_cost_usd")
+  totalScraped      Int       @default(0) @map("total_scraped")
+  totalNew          Int       @default(0) @map("total_new")
+  totalErrors       Int       @default(0) @map("total_errors")
+  errorDetail       String?   @map("error_detail")
+  approvedAt        DateTime? @map("approved_at") @db.Timestamptz
+  startedAt         DateTime? @map("started_at") @db.Timestamptz
+  finishedAt        DateTime? @map("finished_at") @db.Timestamptz
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  portal            Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+
+  @@map("work_plans")
+  @@schema("public")
+}
+
+model RawListing {
+  id               String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portalId         String    @map("portal_id") @db.Uuid
+  scrapeJobId      String?   @map("scrape_job_id") @db.Uuid
+  externalId       String    @map("external_id") @db.VarChar(255)
+  urlListing       String?   @map("url_listing")
+  internalCode     String?   @map("internal_code") @db.VarChar(100)
+  title            String?
+  description      String?
+  operation        String?   @db.VarChar(20)
+  propertyType     String?   @map("property_type") @db.VarChar(50)
+  price            Float?
+  currency         String?   @db.VarChar(3)
+  maintenanceFee   Float?    @map("maintenance_fee")
+  streetAndNumber  String?   @map("street_and_number")
+  neighborhood     String?   @db.VarChar(200)
+  city             String?   @db.VarChar(100)
+  municipality     String?   @db.VarChar(100)
+  state            String?   @db.VarChar(100)
+  country          String?   @db.VarChar(50)
+  zipCode          String?   @map("zip_code") @db.VarChar(10)
+  videoUrl         String?   @map("video_url")
+  tour360Url       String?   @map("tour_360_url")
+  imagesCount      Int       @default(0) @map("images_count")
+  landM2           Float?    @map("land_m2")
+  constructionM2   Float?    @map("construction_m2")
+  antiquity        String?   @db.VarChar(50)
+  constructionYears Int?     @map("construction_years")
+  bedrooms         Int?
+  bathrooms        Int?
+  halfBathrooms    Int?      @map("half_bathrooms")
+  parkingSpaces    Int?      @map("parking_spaces")
+  extraRooms       Json?     @map("extra_rooms")
+  services         Json?
+  amenities        Json?
+  exteriors        Json?
+  extras           Json?
+  conservationStatus String? @map("conservation_status") @db.VarChar(30)
+  hasBalcony       Boolean?  @map("has_balcony")
+  hasElevator      Boolean?  @map("has_elevator")
+  hasStorage       Boolean?  @map("has_storage")
+  builtLevels      Int?      @map("built_levels")
+  minimumStay      Int?      @map("minimum_stay")
+  availability     String?   @db.VarChar(100)
+  rawJson          Json?     @map("raw_json")
+  firstSeenAt      DateTime  @default(now()) @map("first_seen_at") @db.Timestamptz
+  lastSeenAt       DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  @@unique([portalId, externalId], map: "ix_raw_portal_extid")
+  @@index([state, city, municipality, neighborhood], map: "ix_raw_location")
+  @@index([operation, propertyType], map: "ix_raw_operation_type")
+  @@map("raw_listings")
+  @@schema("raw")
+}
