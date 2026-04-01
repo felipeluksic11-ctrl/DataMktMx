@@ -84,27 +84,24 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
             total_stats = {"new": 0, "updated": 0, "errors": 0, "pages": 0}
 
             async def persist_page(page_items):
-                """Callback: persist items to DB after each page."""
-                page_stats = await upsert_raw_listings(
-                    session=session,
-                    items=page_items,
-                    portal_id=portal.id,
-                    scrape_job_id=job.id,
-                )
-                total_stats["new"] += page_stats["new"]
-                total_stats["updated"] += page_stats["updated"]
-                total_stats["errors"] += page_stats["errors"]
-                total_stats["pages"] += 1
-                # Update job stats incrementally
-                job.total_scraped = total_stats["new"] + total_stats["updated"]
-                job.total_new = total_stats["new"]
-                job.total_updated = total_stats["updated"]
-                job.total_errors = total_stats["errors"]
-                await session.commit()
+                """Callback: persist items to DB after each page.
+                Uses a fresh session to avoid greenlet conflicts with Playwright.
+                """
+                async with session_factory() as persist_session:
+                    page_stats = await upsert_raw_listings(
+                        session=persist_session,
+                        items=page_items,
+                        portal_id=portal.id,
+                        scrape_job_id=job.id,
+                    )
+                    total_stats["new"] += page_stats["new"]
+                    total_stats["updated"] += page_stats["updated"]
+                    total_stats["errors"] += page_stats["errors"]
+                    total_stats["pages"] += 1
 
-                # Quality check every 10 pages
-                if total_stats["pages"] % 10 == 0:
-                    await check_quality(session, portal.id, portal_slug, job.id)
+                    # Quality check every 10 pages
+                    if total_stats["pages"] % 10 == 0:
+                        await check_quality(persist_session, portal.id, portal_slug, job.id)
 
                 return page_stats
 
@@ -119,8 +116,11 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
             items = await scraper.run(job)
 
             # Final job update
-            job.status = "completed"
+            job.total_scraped = total_stats["new"] + total_stats["updated"]
+            job.total_new = total_stats["new"]
+            job.total_updated = total_stats["updated"]
             job.total_errors = total_stats["errors"] + scraper.stats["errors"]
+            job.status = "completed"
             job.finished_at = datetime.datetime.now(datetime.UTC)
             await session.commit()
 
