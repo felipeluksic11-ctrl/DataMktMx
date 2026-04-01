@@ -11,6 +11,7 @@ from scrapers.lamudi import LamudiScraper
 from scrapers.propiedades import PropiedadesScraper
 from scrapers.vivanuncios import VivanunciosScraper
 from scrapers.storage import upsert_raw_listings
+from scrapers.quality_check import check_quality
 from shared.config import settings
 from shared.db.models import Portal, ScrapeJob
 from shared.db.session import get_engine, get_session_factory
@@ -80,7 +81,7 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
 
         try:
             # Accumulated stats across all pages
-            total_stats = {"new": 0, "updated": 0, "errors": 0}
+            total_stats = {"new": 0, "updated": 0, "errors": 0, "pages": 0}
 
             async def persist_page(page_items):
                 """Callback: persist items to DB after each page."""
@@ -93,12 +94,18 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
                 total_stats["new"] += page_stats["new"]
                 total_stats["updated"] += page_stats["updated"]
                 total_stats["errors"] += page_stats["errors"]
+                total_stats["pages"] += 1
                 # Update job stats incrementally
                 job.total_scraped = total_stats["new"] + total_stats["updated"]
                 job.total_new = total_stats["new"]
                 job.total_updated = total_stats["updated"]
                 job.total_errors = total_stats["errors"]
                 await session.commit()
+
+                # Quality check every 10 pages
+                if total_stats["pages"] % 10 == 0:
+                    await check_quality(session, portal.id, portal_slug, job.id)
+
                 return page_stats
 
             # Run scraper with per-page persistence
