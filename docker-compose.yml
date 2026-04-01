@@ -75,6 +75,7 @@ services:
 volumes:
   pgdata:
   redisdata:
+  camoufox-cache:  # Persists /root/.cache/camoufox (~713MB) across scraper container restarts
 
 networks:
   propyte:

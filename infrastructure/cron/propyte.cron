@@ -6,12 +6,14 @@
 # Full: all pages, detect removed listings (~1.2GB cards, ~12hrs)
 
 # Daily incremental scrape (2am Mexico = 8am UTC)
-0 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler incremental >> /var/log/datamktmx/scheduler.log 2>&1
+# Uses runner (no Dramatiq/Redis dependency — runs portals sequentially)
+0 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode incremental >> /var/log/datamktmx/scheduler.log 2>&1
 
 # Monthly full scrape (1st of month, midnight Mexico = 6am UTC)
-0 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler full >> /var/log/datamktmx/scheduler.log 2>&1
+0 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode full >> /var/log/datamktmx/scheduler.log 2>&1
 
 # ETL pipeline (Sunday 4am UTC)
+# Uses scheduler's etl-only path (no Dramatiq dependency)
 0 4 * * 0 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler etl >> /var/log/datamktmx/etl.log 2>&1
 
 # Log rotation

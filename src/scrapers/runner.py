@@ -126,8 +126,12 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     await engine.dispose()
 
 
-async def run_all_active() -> None:
-    """Run scrapers for all active portals sequentially."""
+async def run_all_active(mode: str = "full") -> None:
+    """Run scrapers for all active portals sequentially.
+
+    Args:
+        mode: "full" (all pages) or "incremental" (recent only, stop on known)
+    """
     setup_logging()
     session_factory = get_session_factory()
 
@@ -139,7 +143,7 @@ async def run_all_active() -> None:
     for portal in portals:
         if portal.slug in SCRAPER_REGISTRY:
             try:
-                await run_scraper(portal.slug)
+                await run_scraper(portal.slug, mode=mode)
             except Exception:
                 logger.exception("runner.portal_error", slug=portal.slug)
                 continue
@@ -149,18 +153,37 @@ async def run_all_active() -> None:
 
 
 def main() -> None:
-    """CLI entry point."""
+    """CLI entry point.
+
+    Usage:
+        python -m scrapers                              # all active portals, full mode
+        python -m scrapers --mode incremental            # all active portals, incremental
+        python -m scrapers inmuebles24                   # single portal, full mode
+        python -m scrapers inmuebles24 --mode incremental # single portal, incremental
+    """
     import sys
 
     setup_logging()
 
-    if len(sys.argv) > 1:
-        portal_slug = sys.argv[1]
-        logger.info("runner.starting_single", portal=portal_slug)
-        asyncio.run(run_scraper(portal_slug))
+    # Parse --mode flag from argv
+    args = sys.argv[1:]
+    mode = "full"
+    if "--mode" in args:
+        idx = args.index("--mode")
+        if idx + 1 < len(args):
+            mode = args[idx + 1]
+            args = args[:idx] + args[idx + 2:]
+        else:
+            args = args[:idx]
+
+    portal_slug = args[0] if args else None
+
+    if portal_slug:
+        logger.info("runner.starting_single", portal=portal_slug, mode=mode)
+        asyncio.run(run_scraper(portal_slug, mode=mode))
     else:
-        logger.info("runner.starting_all")
-        asyncio.run(run_all_active())
+        logger.info("runner.starting_all", mode=mode)
+        asyncio.run(run_all_active(mode=mode))
 
 
 if __name__ == "__main__":

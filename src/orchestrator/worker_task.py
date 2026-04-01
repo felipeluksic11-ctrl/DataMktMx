@@ -16,6 +16,7 @@ import time
 
 import dramatiq
 
+import shared.dramatiq_broker  # noqa: F401 — configure broker before @dramatiq.actor
 from shared.logging import get_logger, setup_logging
 
 logger = get_logger("orchestrator.worker")
