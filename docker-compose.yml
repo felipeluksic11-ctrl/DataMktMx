@@ -39,6 +39,39 @@ services:
     networks:
       - propyte
 
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: propyte-api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-propyte}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-propyte_data}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-changeme}
+      NODE_ENV: production
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - propyte
+
+  admin:
+    build:
+      context: ./apps/admin
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://${VPS_HOST:-localhost}:3001/api/v1
+    container_name: propyte-admin
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - propyte
+
 volumes:
   pgdata:
   redisdata:
