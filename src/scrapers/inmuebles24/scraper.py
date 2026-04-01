@@ -116,6 +116,10 @@ class Inmuebles24Scraper(BaseScraper):
                         )
                         break
 
+                # Persist immediately if callback is set
+                if self.on_page_scraped:
+                    await self.on_page_scraped(page_items)
+
                 items.extend(page_items)
                 self.logger.info(
                     "scraper.page_done",

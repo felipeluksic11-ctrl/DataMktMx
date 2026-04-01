@@ -79,29 +79,41 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
         logger.info("runner.job_started", job_id=job.id, portal=portal_slug, mode=mode)
 
         try:
-            # Run scraper
+            # Accumulated stats across all pages
+            total_stats = {"new": 0, "updated": 0, "errors": 0}
+
+            async def persist_page(page_items):
+                """Callback: persist items to DB after each page."""
+                page_stats = await upsert_raw_listings(
+                    session=session,
+                    items=page_items,
+                    portal_id=portal.id,
+                    scrape_job_id=job.id,
+                )
+                total_stats["new"] += page_stats["new"]
+                total_stats["updated"] += page_stats["updated"]
+                total_stats["errors"] += page_stats["errors"]
+                # Update job stats incrementally
+                job.total_scraped = total_stats["new"] + total_stats["updated"]
+                job.total_new = total_stats["new"]
+                job.total_updated = total_stats["updated"]
+                job.total_errors = total_stats["errors"]
+                await session.commit()
+                return page_stats
+
+            # Run scraper with per-page persistence
             scraper = scraper_cls(
                 proxy_manager=proxy_manager,
                 mode=mode,
                 known_cache=known_cache,
                 **kwargs,
             )
+            scraper.on_page_scraped = persist_page
             items = await scraper.run(job)
 
-            # Persist to database
-            stats = await upsert_raw_listings(
-                session=session,
-                items=items,
-                portal_id=portal.id,
-                scrape_job_id=job.id,
-            )
-
-            # Update job stats
+            # Final job update
             job.status = "completed"
-            job.total_scraped = stats["new"] + stats["updated"]
-            job.total_new = stats["new"]
-            job.total_updated = stats["updated"]
-            job.total_errors = stats["errors"] + scraper.stats["errors"]
+            job.total_errors = total_stats["errors"] + scraper.stats["errors"]
             job.finished_at = datetime.datetime.now(datetime.UTC)
             await session.commit()
 
@@ -109,7 +121,7 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
                 "runner.job_completed",
                 job_id=job.id,
                 portal=portal_slug,
-                **stats,
+                **total_stats,
             )
 
         except Exception as e:

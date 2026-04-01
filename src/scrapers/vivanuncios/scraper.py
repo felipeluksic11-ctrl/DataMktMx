@@ -110,6 +110,10 @@ class VivanunciosScraper(BaseScraper):
                 else:
                     items.extend([self._partial_to_item(p) for p in partials])
 
+                if self.on_page_scraped:
+                    page_items_viv = items[-len(partials):]  # items just added
+                    await self.on_page_scraped(page_items_viv)
+
                 self.logger.info("scraper.page_done", page=page_num, count=len(partials), total=len(items))
                 await asyncio.sleep(random.uniform(
                     config.REQUEST_DELAY_MIN_MS / 1000,

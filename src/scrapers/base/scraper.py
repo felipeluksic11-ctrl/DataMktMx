@@ -1,12 +1,17 @@
 import abc
 import datetime
+from collections.abc import Callable, Awaitable
 from dataclasses import dataclass, field
+from typing import Optional
 
 from shared.db.models import ScrapeJob
 from shared.logging import get_logger
 from shared.proxy.manager import ProxyManager
 
 logger = get_logger(__name__)
+
+# Callback type: receives a list of ScrapedItems, returns stats dict
+OnPageCallback = Callable[["list[ScrapedItem]"], Awaitable[dict[str, int]]]
 
 
 @dataclass
@@ -98,6 +103,7 @@ class BaseScraper(abc.ABC):
     def __init__(self, proxy_manager: ProxyManager | None = None):
         self.proxy_manager = proxy_manager or ProxyManager()
         self.logger = get_logger(f"scraper.{self.portal_slug}")
+        self.on_page_scraped: OnPageCallback | None = None
         self.stats: dict[str, int] = {
             "scraped": 0,
             "errors": 0,

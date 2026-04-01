@@ -84,6 +84,9 @@ class PropiedadesScraper(BaseScraper):
                     self.logger.info("scraper.no_more_results", page=page_num, state=state)
                     break
 
+                if self.on_page_scraped:
+                    await self.on_page_scraped(page_items)
+
                 items.extend(page_items)
                 self.logger.info(
                     "scraper.page_done",
