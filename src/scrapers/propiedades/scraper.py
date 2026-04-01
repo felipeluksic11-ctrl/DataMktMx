@@ -23,8 +23,13 @@ class PropiedadesScraper(BaseScraper):
         operations: list[str] | None = None,
         max_pages: int = config.MAX_PAGES_PER_SEARCH,
         visit_detail: bool = True,
+        mode: str = "full",
+        known_cache=None,
+        **kwargs,
     ):
         super().__init__(proxy_manager)
+        self.mode = mode
+        self.known_cache = known_cache
         self.states = states or config.STATES
         self.operations = operations or ["venta", "renta"]
         self.max_pages = max_pages
