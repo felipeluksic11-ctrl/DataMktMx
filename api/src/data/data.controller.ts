@@ -69,11 +69,18 @@ export class DataController {
         id, portal_id as "portalId", external_id as "externalId",
         title, operation, property_type as "propertyType",
         price, currency, state, municipality, city, neighborhood,
-        bedrooms, bathrooms, land_m2 as "landM2", construction_m2 as "constructionM2",
-        images_count as "imagesCount", created_at as "createdAt"
+        street_and_number as "streetAndNumber",
+        bedrooms, bathrooms, half_bathrooms as "halfBathrooms",
+        parking_spaces as "parkingSpaces",
+        land_m2 as "landM2", construction_m2 as "constructionM2",
+        antiquity, conservation_status as "conservationStatus",
+        images_count as "imagesCount",
+        url_listing as "urlListing",
+        first_seen_at as "firstSeenAt", last_seen_at as "lastSeenAt",
+        created_at as "createdAt"
       FROM raw.raw_listings
       WHERE ${whereClause}
-      ORDER BY price DESC NULLS LAST
+      ORDER BY created_at DESC NULLS LAST
       LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
       ...params,
       take,

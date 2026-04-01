@@ -5,14 +5,26 @@ interface Listing {
   id: string;
   title: string;
   price: number;
+  currency: string | null;
   operation: string;
   propertyType: string;
+  streetAndNumber: string | null;
   neighborhood: string | null;
   municipality: string | null;
   state: string | null;
   bedrooms: number | null;
   bathrooms: number | null;
+  halfBathrooms: number | null;
+  parkingSpaces: number | null;
+  landM2: number | null;
   constructionM2: number | null;
+  antiquity: string | null;
+  conservationStatus: string | null;
+  imagesCount: number | null;
+  urlListing: string | null;
+  firstSeenAt: string | null;
+  lastSeenAt: string | null;
+  createdAt: string | null;
 }
 
 interface DataResponse {
@@ -31,6 +43,12 @@ async function getListings(searchParams: Record<string, string>): Promise<DataRe
   } catch {
     return { data: [], total: 0 };
   }
+}
+
+function formatPrice(price: number | null, currency: string | null) {
+  if (price == null) return '—';
+  const formatted = price.toLocaleString('es-MX');
+  return currency === 'USD' ? `US$${formatted}` : `$${formatted}`;
 }
 
 export default async function DataPage({
@@ -66,42 +84,58 @@ export default async function DataPage({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
-                <th className="px-4 py-3 font-medium">Titulo</th>
-                <th className="px-4 py-3 font-medium">Precio</th>
-                <th className="px-4 py-3 font-medium">Op.</th>
-                <th className="px-4 py-3 font-medium">Tipo</th>
-                <th className="px-4 py-3 font-medium">Colonia</th>
-                <th className="px-4 py-3 font-medium">Municipio</th>
-                <th className="px-4 py-3 font-medium">Estado</th>
-                <th className="px-4 py-3 font-medium">Rec.</th>
-                <th className="px-4 py-3 font-medium">Banos</th>
-                <th className="px-4 py-3 font-medium">m2</th>
+                <th className="px-3 py-3 font-medium">Titulo</th>
+                <th className="px-3 py-3 font-medium">Precio</th>
+                <th className="px-3 py-3 font-medium">Op.</th>
+                <th className="px-3 py-3 font-medium">Tipo</th>
+                <th className="px-3 py-3 font-medium">Colonia</th>
+                <th className="px-3 py-3 font-medium">Municipio</th>
+                <th className="px-3 py-3 font-medium">Estado</th>
+                <th className="px-3 py-3 font-medium text-center">Rec.</th>
+                <th className="px-3 py-3 font-medium text-center">Banos</th>
+                <th className="px-3 py-3 font-medium text-center">1/2 B</th>
+                <th className="px-3 py-3 font-medium text-center">Est.</th>
+                <th className="px-3 py-3 font-medium text-right">m2 Const.</th>
+                <th className="px-3 py-3 font-medium text-right">m2 Terr.</th>
+                <th className="px-3 py-3 font-medium">Antig.</th>
+                <th className="px-3 py-3 font-medium text-center">Imgs</th>
               </tr>
             </thead>
             <tbody className="divide-y">
               {listings.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">
+                  <td colSpan={15} className="px-4 py-8 text-center text-muted-foreground">
                     No hay listings
                   </td>
                 </tr>
               ) : (
                 listings.map((l) => (
-                  <tr key={l.id}>
-                    <td className="max-w-[200px] truncate px-4 py-3 font-medium" title={l.title}>
-                      {l.title}
+                  <tr key={l.id} className="hover:bg-muted/50">
+                    <td className="max-w-[220px] truncate px-3 py-2.5 font-medium" title={l.title}>
+                      {l.urlListing ? (
+                        <a href={l.urlListing} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                          {l.title || '—'}
+                        </a>
+                      ) : (
+                        l.title || '—'
+                      )}
                     </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      ${l.price?.toLocaleString() ?? '—'}
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {formatPrice(l.price, l.currency)}
                     </td>
-                    <td className="px-4 py-3">{l.operation}</td>
-                    <td className="px-4 py-3">{l.propertyType}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{l.neighborhood ?? '—'}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{l.municipality ?? '—'}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{l.state ?? '—'}</td>
-                    <td className="px-4 py-3">{l.bedrooms ?? '—'}</td>
-                    <td className="px-4 py-3">{l.bathrooms ?? '—'}</td>
-                    <td className="px-4 py-3">{l.constructionM2 ?? '—'}</td>
+                    <td className="px-3 py-2.5">{l.operation ?? '—'}</td>
+                    <td className="px-3 py-2.5">{l.propertyType ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{l.neighborhood ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{l.municipality ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{l.state ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-center">{l.bedrooms ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-center">{l.bathrooms ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-center">{l.halfBathrooms ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-center">{l.parkingSpaces ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right">{l.constructionM2?.toLocaleString() ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-right">{l.landM2?.toLocaleString() ?? '—'}</td>
+                    <td className="px-3 py-2.5">{l.antiquity ?? '—'}</td>
+                    <td className="px-3 py-2.5 text-center">{l.imagesCount || '—'}</td>
                   </tr>
                 ))
               )}

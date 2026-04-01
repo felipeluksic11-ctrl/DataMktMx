@@ -115,14 +115,14 @@ def _parse_features(feature_texts: list[str]) -> dict:
                 if years:
                     result["antiquity"] = str(years)
                     result["construction_years"] = years
-            # bare "m²" without qualifier
+            # bare "m²" without qualifier — default to construction (most common)
             elif "m²" in text:
                 val = _extract_float(text)
                 if val:
-                    if result["land_m2"] is None:
-                        result["land_m2"] = val
-                    elif result["construction_m2"] is None:
+                    if result["construction_m2"] is None:
                         result["construction_m2"] = val
+                    elif result["land_m2"] is None:
+                        result["land_m2"] = val
 
     return result
 
