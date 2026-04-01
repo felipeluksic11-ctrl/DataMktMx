@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Props {
   defaults: Record<string, string>;
@@ -15,6 +15,14 @@ export function DataFilters({ defaults, exportUrl }: Props) {
   const [state, setState] = useState(defaults.state || '');
   const [priceMin, setPriceMin] = useState(defaults.priceMin || '');
   const [priceMax, setPriceMax] = useState(defaults.priceMax || '');
+
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    const interval = setInterval(() => {
+      router.refresh();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [router]);
 
   function handleSearch() {
     const params = new URLSearchParams();
