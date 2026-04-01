@@ -66,6 +66,11 @@ SELECTORS = {
     "card_price_fallback": "[class*='bxbIOz']",
     "card_location_street": ".pcom-property-card-body-main-info-street",
     "card_location_spans": ".pcom-property-card-body-main-info-street span",
+    "card_features": "li.amenities",
+    "card_street_address": "[itemprop='streetAddress']",
+    "card_locality": "[itemprop='addressLocality']",
+    "card_region": "[itemprop='addressRegion']",
+    "card_postal_code": "[itemprop='postalCode']",
 
     # Pagination — total count from H1
     "total_count_h1": "h1",

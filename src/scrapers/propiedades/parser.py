@@ -131,6 +131,48 @@ def _parse_features(feature_texts: list[str]) -> dict:
     return result
 
 
+# ──────────────────────────── Card feature parsing ────────────────────────────
+
+
+def _parse_card_features(texts: list[str]) -> dict:
+    """Parse card amenity items like '2 Recámaras', '1 Baño', '74 m²'."""
+    result: dict = {
+        "bedrooms": None,
+        "bathrooms": None,
+        "half_bathrooms": None,
+        "construction_m2": None,
+        "land_m2": None,
+        "parking_spaces": None,
+    }
+
+    for raw in texts:
+        text = _clean_whitespace(raw).lower()
+
+        if "recámara" in text or "recamara" in text or "habitaci" in text:
+            result["bedrooms"] = _extract_int(text)
+        elif "medio baño" in text or "½ baño" in text:
+            result["half_bathrooms"] = _extract_int(text)
+        elif "baño" in text:
+            val = _extract_float(text)
+            if val and val != int(val):
+                # 2.5 baños → 2 baños + 1 medio baño
+                result["bathrooms"] = int(val)
+                result["half_bathrooms"] = 1
+            else:
+                result["bathrooms"] = _extract_int(text)
+        elif "estac" in text or "cochera" in text or "garage" in text:
+            result["parking_spaces"] = _extract_int(text)
+        elif "terreno" in text or "lote" in text:
+            result["land_m2"] = _extract_float(text)
+        elif "const" in text:
+            result["construction_m2"] = _extract_float(text)
+        elif "m²" in text or "m2" in text:
+            # Bare m² without qualifier → construction
+            result["construction_m2"] = _extract_float(text)
+
+    return result
+
+
 # ──────────────────────────── Characteristic parsing (detail page) ────────────────────────────
 
 
@@ -452,33 +494,56 @@ async def parse_search_results(page: Page) -> list[dict]:
         price_text = (await price_el.text_content() or "").strip() if price_el else ""
         price, currency = _clean_price(price_text)
 
-        # Location
-        street_el = await card.query_selector(config.SELECTORS["card_location_street"])
-        street_text = (await street_el.text_content() or "").strip() if street_el else ""
+        # Location via itemprop attributes (structured)
+        street_el = await card.query_selector(config.SELECTORS["card_street_address"])
+        locality_el = await card.query_selector(config.SELECTORS["card_locality"])
+        region_el = await card.query_selector(config.SELECTORS["card_region"])
+        postal_el = await card.query_selector(config.SELECTORS["card_postal_code"])
 
-        span_els = await card.query_selector_all(config.SELECTORS["card_location_spans"])
-        span_texts = [(await s.text_content() or "").strip() for s in span_els]
-        location = _parse_location_spans(span_texts)
+        street_raw = (await street_el.get_attribute("content") or "").strip() if street_el else ""
+        municipality = (await locality_el.get_attribute("content") or "").strip() if locality_el else None
+        region = (await region_el.get_attribute("content") or "").strip() if region_el else None
+        zip_code = (await postal_el.get_attribute("content") or "").strip() if postal_el else None
 
-        # Title from link text or street
-        title_text = (await link_el.text_content() or "").strip() if link_el else None
-        title = title_text or street_text or None
+        # Parse street: extract neighborhood from "Calle, Colonia, Delegación, CP Ciudad, CDMX"
+        street = None
+        neighborhood = None
+        if street_raw:
+            parts = [p.strip() for p in street_raw.split(",") if p.strip()]
+            if len(parts) >= 2:
+                street = parts[0]
+                neighborhood = parts[-1].replace("Col. ", "").replace("Col.", "").strip()
+            elif len(parts) == 1:
+                street = parts[0]
+
+        # Features from card amenities (li.amenities)
+        feat_els = await card.query_selector_all(config.SELECTORS["card_features"])
+        feat_texts = [(await f.text_content() or "").strip() for f in feat_els]
+        feat_texts = [t for t in feat_texts if t]
+        features = _parse_card_features(feat_texts)
+
+        # Title
+        title_text = (await link_el.get_attribute("title") or "").strip() if link_el else None
+        if not title_text:
+            title_text = street_raw or None
 
         results.append({
             "external_id": external_id,
             "detail_url": detail_url,
             "url_listing": detail_url,
-            "title": title,
+            "title": title_text,
             "price": price,
             "currency": currency,
             "property_type": property_type,
             "badge_operation": badge_operation,
-            "street_and_number": street_text or None,
-            "municipality": location.get("municipality"),
-            "zip_code": location.get("zip_code"),
+            "street_and_number": street,
+            "neighborhood": neighborhood,
+            "municipality": municipality,
+            "zip_code": zip_code,
             "latitude": latitude,
             "longitude": longitude,
-            "country": location.get("country") or "México",
+            "country": "México",
+            **features,
         })
 
     logger.info("parser.cards_parsed", count=len(results), url=page.url)
