@@ -50,7 +50,7 @@ async def _run_worker(
     """The actual async worker logic."""
     import random
 
-    from scrapers.inmuebles24 import Inmuebles24Scraper
+    from scrapers.runner import SCRAPER_REGISTRY
     from scrapers.storage import upsert_raw_listings
     from shared.db.models import Portal, ScrapeJob, WorkPlan
     from shared.db.session import get_engine, get_session_factory
@@ -91,8 +91,12 @@ async def _run_worker(
         await session.refresh(job)
 
         try:
-            # Create scraper with worker identity
-            scraper = Inmuebles24Scraper(
+            # Create scraper from registry
+            scraper_cls = SCRAPER_REGISTRY.get(portal_slug)
+            if not scraper_cls:
+                raise ValueError(f"No scraper registered for portal: {portal_slug}")
+
+            scraper = scraper_cls(
                 proxy_manager=proxy_manager,
                 states=shuffled_states,
                 operations=[operation],
@@ -101,7 +105,6 @@ async def _run_worker(
                 visit_detail=visit_detail,
             )
 
-            # Override the scraper's browser creation to use our identity
             items = await scraper.scrape()
 
             # Persist
