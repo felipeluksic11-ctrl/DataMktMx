@@ -138,11 +138,12 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     await engine.dispose()
 
 
-async def run_all_active(mode: str = "full") -> None:
+async def run_all_active(mode: str = "full", **kwargs) -> None:
     """Run scrapers for all active portals sequentially.
 
     Args:
         mode: "full" (all pages) or "incremental" (recent only, stop on known)
+        **kwargs: passed to each scraper (e.g. visit_detail=False)
     """
     setup_logging()
     session_factory = get_session_factory()
@@ -155,7 +156,7 @@ async def run_all_active(mode: str = "full") -> None:
     for portal in portals:
         if portal.slug in SCRAPER_REGISTRY:
             try:
-                await run_scraper(portal.slug, mode=mode)
+                await run_scraper(portal.slug, mode=mode, **kwargs)
             except Exception:
                 logger.exception("runner.portal_error", slug=portal.slug)
                 continue
@@ -177,9 +178,11 @@ def main() -> None:
 
     setup_logging()
 
-    # Parse --mode flag from argv
+    # Parse flags from argv
     args = sys.argv[1:]
     mode = "full"
+    visit_detail = True
+
     if "--mode" in args:
         idx = args.index("--mode")
         if idx + 1 < len(args):
@@ -188,14 +191,19 @@ def main() -> None:
         else:
             args = args[:idx]
 
+    if "--no-detail" in args:
+        visit_detail = False
+        args.remove("--no-detail")
+
     portal_slug = args[0] if args else None
+    kwargs = {"visit_detail": visit_detail}
 
     if portal_slug:
-        logger.info("runner.starting_single", portal=portal_slug, mode=mode)
-        asyncio.run(run_scraper(portal_slug, mode=mode))
+        logger.info("runner.starting_single", portal=portal_slug, mode=mode, visit_detail=visit_detail)
+        asyncio.run(run_scraper(portal_slug, mode=mode, **kwargs))
     else:
-        logger.info("runner.starting_all", mode=mode)
-        asyncio.run(run_all_active(mode=mode))
+        logger.info("runner.starting_all", mode=mode, visit_detail=visit_detail)
+        asyncio.run(run_all_active(mode=mode, **kwargs))
 
 
 if __name__ == "__main__":
