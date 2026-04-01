@@ -84,6 +84,7 @@ async def upsert_raw_listings(
 
         except Exception:
             stats["errors"] += 1
+            await session.rollback()
             logger.exception("storage.upsert_error", external_id=item.external_id)
 
     await session.commit()
