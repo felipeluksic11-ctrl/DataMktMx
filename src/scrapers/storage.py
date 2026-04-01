@@ -1,7 +1,5 @@
 """Persist scraped items to raw_listings table."""
 
-from geoalchemy2.shape import from_shape
-from shapely.geometry import Point
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,13 +28,6 @@ _DIRECT_FIELDS = [
 ]
 
 
-def _item_to_geom(item: ScrapedItem):
-    """Convert lat/lng to PostGIS geometry, or None."""
-    if item.latitude and item.longitude:
-        return from_shape(Point(item.longitude, item.latitude), srid=4326)
-    return None
-
-
 async def upsert_raw_listings(
     session: AsyncSession,
     items: list[ScrapedItem],
@@ -55,8 +46,6 @@ async def upsert_raw_listings(
             result = await session.execute(stmt)
             existing = result.scalar_one_or_none()
 
-            geom = _item_to_geom(item)
-
             if existing:
                 # Update: overwrite only non-None fields from the new scrape
                 for field in _DIRECT_FIELDS:
@@ -64,8 +53,6 @@ async def upsert_raw_listings(
                     if new_val is not None:
                         setattr(existing, field, new_val)
                 existing.scrape_job_id = scrape_job_id or existing.scrape_job_id
-                if geom is not None:
-                    existing.geom = geom
                 stats["updated"] += 1
             else:
                 kwargs = {
@@ -77,8 +64,6 @@ async def upsert_raw_listings(
                     kwargs[field] = getattr(item, field, None)
 
                 listing = RawListing(**kwargs)
-                if geom is not None:
-                    listing.geom = geom
                 session.add(listing)
                 stats["new"] += 1
 

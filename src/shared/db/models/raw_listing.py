@@ -64,9 +64,8 @@ class RawListing(Base):
     state: Mapped[str | None] = mapped_column(String(100), default=None)
     country: Mapped[str | None] = mapped_column(String(50), default=None)
     zip_code: Mapped[str | None] = mapped_column(String(10), default=None)
-    geom: Mapped[None] = mapped_column(
-        Geometry("POINT", srid=4326), nullable=True, default=None, init=False
-    )
+    # geom column managed outside SQLAlchemy (PostGIS, added via ALTER TABLE)
+    # to avoid conflicts with Prisma db push which doesn't support geometry types
 
     # === Media (URLs only, no files) ===
     video_url: Mapped[str | None] = mapped_column(Text, default=None)
