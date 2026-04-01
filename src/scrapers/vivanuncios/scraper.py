@@ -41,14 +41,14 @@ class VivanunciosScraper(BaseScraper):
         return f"{config.BASE_URL}/s-{op_slug}-inmuebles/{state}/v1{config.CATEGORY_CODE}{loc_code}p{page}"
 
     async def scrape(self) -> list[ScrapedItem]:
-        browser, context = await create_stealth_browser(
-            config=BrowserConfig(headless=True),
-            proxy_manager=self.proxy_manager,
-        )
+        items: list[ScrapedItem] = []
 
-        try:
-            items: list[ScrapedItem] = []
-            for state in self.states:
+        for state in self.states:
+            browser, context = await create_stealth_browser(
+                config=BrowserConfig(headless=True),
+                proxy_manager=self.proxy_manager,
+            )
+            try:
                 for operation in self.operations:
                     search_items = await self._scrape_search(context, state, operation)
                     items.extend(search_items)
@@ -56,10 +56,14 @@ class VivanunciosScraper(BaseScraper):
                         "scraper.search_done",
                         state=state, operation=operation, count=len(search_items),
                     )
-            return items
-        finally:
-            await context.close()
-            await browser.close()
+            except Exception:
+                self.stats["errors"] += 1
+                self.logger.exception("scraper.state_error", state=state)
+            finally:
+                await context.close()
+                await browser.close()
+
+        return items
 
     async def _scrape_search(self, context: BrowserContext, state: str, operation: str) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []

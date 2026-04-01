@@ -42,15 +42,15 @@ class Inmuebles24Scraper(BaseScraper):
             self.max_pages = min(max_pages, INCREMENTAL_MAX_PAGES)
 
     async def scrape(self) -> list[ScrapedItem]:
-        browser, context = await create_stealth_browser(
-            config=BrowserConfig(headless=True),
-            proxy_manager=self.proxy_manager,
-        )
+        items: list[ScrapedItem] = []
 
-        try:
-            items: list[ScrapedItem] = []
-
-            for state in self.states:
+        for state in self.states:
+            # Fresh browser per state to avoid crashes from long-lived Firefox
+            browser, context = await create_stealth_browser(
+                config=BrowserConfig(headless=True),
+                proxy_manager=self.proxy_manager,
+            )
+            try:
                 for operation in self.operations:
                     for prop_type in self.property_types:
                         search_items = await self._scrape_search(
@@ -64,11 +64,14 @@ class Inmuebles24Scraper(BaseScraper):
                             property_type=prop_type,
                             count=len(search_items),
                         )
+            except Exception:
+                self.stats["errors"] += 1
+                self.logger.exception("scraper.state_error", state=state)
+            finally:
+                await context.close()
+                await browser.close()
 
-            return items
-        finally:
-            await context.close()
-            await browser.close()
+        return items
 
     async def _scrape_search(
         self,
