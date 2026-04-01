@@ -24,7 +24,7 @@ export class DataController {
     @Query('priceMin') priceMin?: string,
     @Query('priceMax') priceMax?: string,
   ) {
-    const take = Math.min(parseInt(limit || '20', 10), 100);
+    const take = Math.min(parseInt(limit || '20', 10), 1000);
     const skip = (Math.max(parseInt(page || '1', 10), 1) - 1) * take;
 
     const conditions: string[] = ['1=1'];
@@ -66,21 +66,28 @@ export class DataController {
 
     const rows = await this.prisma.$queryRawUnsafe(
       `SELECT
-        id, portal_id as "portalId", external_id as "externalId",
-        title, operation, property_type as "propertyType",
-        price, currency, state, municipality, city, neighborhood,
-        street_and_number as "streetAndNumber",
-        bedrooms, bathrooms, half_bathrooms as "halfBathrooms",
-        parking_spaces as "parkingSpaces",
-        land_m2 as "landM2", construction_m2 as "constructionM2",
-        antiquity, conservation_status as "conservationStatus",
-        images_count as "imagesCount",
-        url_listing as "urlListing",
-        first_seen_at as "firstSeenAt", last_seen_at as "lastSeenAt",
-        created_at as "createdAt"
-      FROM raw.raw_listings
+        r.id, p.slug as "portalSlug",
+        r.external_id as "externalId", r.internal_code as "internalCode",
+        r.title, r.description, r.operation, r.property_type as "propertyType",
+        r.price, r.currency, r.maintenance_fee as "maintenanceFee",
+        r.street_and_number as "streetAndNumber",
+        r.neighborhood, r.city, r.municipality, r.state, r.country,
+        r.zip_code as "zipCode",
+        r.bedrooms, r.bathrooms, r.half_bathrooms as "halfBathrooms",
+        r.parking_spaces as "parkingSpaces",
+        r.land_m2 as "landM2", r.construction_m2 as "constructionM2",
+        r.antiquity, r.construction_years as "constructionYears",
+        r.conservation_status as "conservationStatus",
+        r.has_balcony as "hasBalcony", r.has_elevator as "hasElevator",
+        r.has_storage as "hasStorage", r.built_levels as "builtLevels",
+        r.images_count as "imagesCount",
+        r.url_listing as "urlListing",
+        r.first_seen_at as "firstSeenAt", r.last_seen_at as "lastSeenAt",
+        r.created_at as "createdAt"
+      FROM raw.raw_listings r
+      JOIN public.portals p ON r.portal_id = p.id
       WHERE ${whereClause}
-      ORDER BY created_at DESC NULLS LAST
+      ORDER BY r.created_at DESC NULLS LAST
       LIMIT $${paramIdx++} OFFSET $${paramIdx++}`,
       ...params,
       take,
