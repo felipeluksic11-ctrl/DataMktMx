@@ -1,7 +1,8 @@
-# Beta3.1 — Propyte Data Mining Infrastructure
+# Beta3.1 — DataMktMx Data Mining Infrastructure
 
 ## Project Overview
-Central de mineria de datos inmobiliarios para Mexico. Recopila listings de 7 portales, los limpia, deduplica, y exporta agregados estadisticos a produccion via S3.
+
+Central de mineria de datos inmobiliarios para Mexico. Recopila listings de portales, los limpia, deduplica, y exporta agregados estadisticos a produccion via S3.
 
 **Principio rector:** "El dato tiene valor; el metodo es invisible." Nunca revelar fuentes, URLs de origen, ni metadata de recopilacion.
 
@@ -12,7 +13,8 @@ VPS Hetzner (scraping) → S3 (intermediario) → Supabase (produccion)
 ```
 
 ### Components
-- **src/scrapers/** — Python 3.12 + Crawlee + Playwright. Un sub-agente por portal.
+
+- **src/scrapers/** — Python 3.12 + Playwright + Camoufox. Un modulo por portal.
 - **src/etl/** — Pipeline de limpieza determinista (regex, no LLM). Normaliza, deduplica, valida.
 - **src/supervisors/** — Claude Haiku (monitor) + Sonnet (auto-repair selectores).
 - **api/** — NestJS backend para admin dashboard.
@@ -20,26 +22,29 @@ VPS Hetzner (scraping) → S3 (intermediario) → Supabase (produccion)
 - **infrastructure/** — Docker Compose, Dockerfiles, nginx, scripts de VPS/backup.
 
 ### Portals
-Inmuebles24, Propiedades.com, EasyBroker, Segundamano, Lamudi, Vivanuncios, Facebook Marketplace (via Apify)
+
+Inmuebles24, Propiedades.com, Lamudi, Vivanuncios, MercadoLibre, EasyBroker
 
 ## Tech Stack
 
 ### Python (scrapers + ETL)
-- Python 3.12, Crawlee, Playwright, Camoufox, httpx, Dramatiq, Redis
+
+- Python 3.12, Playwright, Camoufox, httpx
 - SQLAlchemy + Alembic (migrations), thefuzz (dedup), Pandas
 - anthropic SDK (supervisores IA via Batch API)
 
 ### TypeScript (admin dashboard + API)
+
 - Next.js 15 + Tailwind CSS + shadcn/ui (dashboard)
 - NestJS + Prisma (API backend)
 - NextAuth.js (auth)
 
 ### Infrastructure
+
 - PostgreSQL 16 + PostGIS + pgcrypto + pg_trgm
-- Redis 7 (cola Dramatiq + cache)
+- Redis 7 (cache)
 - Docker Compose (all services)
 - SOPS + age (secrets)
-- Prometheus (metrics)
 
 ## Commands
 
@@ -53,6 +58,12 @@ docker compose exec postgres psql -U propyte propyte_data  # DB shell
 cd src && python -m pytest              # Run tests
 cd src && ruff check .                  # Lint
 
+# Scrapers (VPS)
+python -m scrapers inmuebles24 --no-detail --states ciudad-de-mexico --budget 30  # Test
+python -m scrapers --mode incremental --no-detail --budget 200                    # Incremental
+python -m scrapers --mode full --no-detail --budget 2000                          # Full
+python -m scrapers inmuebles24 --enrich --budget 500                              # Detail enrichment
+
 # Admin dashboard
 cd apps/admin && npm run dev            # Dev server
 cd apps/admin && npm run build          # Build
@@ -60,15 +71,12 @@ cd apps/admin && npm run build          # Build
 # API
 cd api && npm run start:dev             # Dev server
 cd api && npm run test                  # Tests
-
-# Infrastructure
-./infrastructure/scripts/backup.sh      # Backup DB to S3
-./infrastructure/scripts/restore.sh     # Restore from S3
 ```
 
 ## Code Conventions
 
 ### Python
+
 - Async-first (asyncio)
 - Type hints everywhere
 - One module per portal in src/scrapers/
@@ -76,12 +84,14 @@ cd api && npm run test                  # Tests
 - Structured JSON logging
 
 ### TypeScript
+
 - Strict mode enabled
 - App Router (Next.js)
 - Server components by default, client components only when needed
 - shadcn/ui for all UI components
 
 ## Security Rules
+
 - NEVER commit secrets (.env, API keys, credentials)
 - NEVER export raw URLs, portal IDs, or scraping metadata to S3
 - NEVER store personal data (agent names, phones, emails)
@@ -89,49 +99,115 @@ cd api && npm run test                  # Tests
 - Pre-commit hooks: gitleaks blocks exposed secrets
 - Secrets encrypted with SOPS + age
 
+## Scraping Strategy (CRITICAL — read before touching scrapers)
+
+El scraping opera en dos fases para optimizar bandwidth y cobertura.
+
+### Fase 1: Cards-only (cobertura masiva, bajo costo)
+
+Recorre paginas de busqueda y extrae datos de las cards sin visitar cada listing.
+
+- **Captura:** precio, ubicacion (estado/municipio/colonia), recamaras (~68%), banos (~72%), m2 (~64%), tipo, estacionamientos
+- **Costo:** ~64 KB por pagina, ~30-47 listings por pagina
+- **Flag:** `--no-detail` (OBLIGATORIO en cron y tests)
+- **Frecuencia:** diario incremental + mensual full
+
+### Fase 2: Detail enrichment (selectivo, solo listings incompletos)
+
+Visita la pagina de detalle SOLO de listings que les falten campos clave.
+
+- **Captura adicional:** coordenadas lat/lng, m2 construccion, antiguedad, descripcion completa, amenidades, servicios, exteriores, extras, cuartos extra, balcon/elevador/bodega, conservacion, cuota mantenimiento, video/tour URLs, codigo interno
+- **Costo:** ~200 KB por detail page
+- **Flag:** `--enrich` (solo visita listings con campos vacios)
+- **Frecuencia:** semanal, con budget controlado
+- **Criterio de seleccion:** listings donde construction_m2 IS NULL OR latitude IS NULL OR description IS NULL
+
+### Regla de oro
+
+**NUNCA correr detail para todos los listings.** Solo enriquecer los que tienen campos vacios. Un full scrape con detail de 60K listings cuesta ~12 GB de proxy. Un enrichment selectivo de 20K listings incompletos cuesta ~4 GB.
+
+### Campos por fuente (referencia)
+
+| Campo | Card | Detail |
+|-------|------|--------|
+| precio, ubicacion, tipo | si | si |
+| recamaras, banos, estac. | parcial | completo |
+| m2 construccion, terreno | parcial | completo |
+| coordenadas lat/lng | no | si (JSON-LD / map) |
+| descripcion completa | no | si |
+| antiguedad / anos | parcial | completo |
+| amenidades, servicios | pills (parcial) | completo (seccion general features) |
+| exteriores, extras | pills (parcial) | completo |
+| cuartos extra, bodega, balcon | no | si |
+| conservacion | no | si |
+| cuota mantenimiento | no | si |
+| video / tour 360 | no | si (URL only) |
+
 ## Proxy & Bandwidth Rules (CRITICAL)
 
-Proxy traffic costs real money. Every scraper run MUST be bandwidth-conscious.
+Proxy traffic costs real money ($1/GB). Every scraper run MUST be bandwidth-conscious.
 
 ### Mandatory for ALL scraper runs
-- **ALWAYS use `--budget` flag** when running scrapers manually or via cron. No exceptions.
+
+- **ALWAYS use `--budget` flag.** No exceptions, no default sin limite.
   - Test runs: `--budget 30` (30 MB)
   - Incremental: `--budget 200` (200 MB)
-  - Full scrape: `--budget 2000` (2 GB)
-- **ALWAYS use `--no-detail`** unless detail pages are explicitly needed
-- **ALWAYS use `--states` for testing** — never run a full 32-state test
+  - Full scrape cards-only: `--budget 2000` (2 GB)
+  - Detail enrichment: `--budget 500` (500 MB)
+- **ALWAYS use `--no-detail`** para scrapes normales. Detail solo via `--enrich`.
+- **ALWAYS use `--states` para testing** — nunca correr 32 estados para probar.
 
-### Resource blocking (automatic)
-- Images, fonts, media, trackers are blocked in Playwright (see `shared/stealth/browser.py`)
-- This reduces per-page transfer from ~2.5 MB to ~100-200 KB
-- NEVER disable resource blocking
-- NEVER download images through the proxy
+### Resource blocking (automatico en shared/stealth/browser.py)
 
-### Budget enforcement
-- `BandwidthTracker` (shared/proxy/bandwidth.py) counts real bytes per portal
-- `BudgetExhausted` exception stops scraping gracefully when limit is reached
-- Budget is set via `--budget` CLI flag or `PROXY_BUDGET_MB` env var (default 500 MB)
+- Bloqueado: imagenes, fonts, media, trackers (google-analytics, facebook, hotjar, etc.)
+- Resultado: ~64 KB/pagina (vs ~2.5 MB sin blocking). **40x ahorro.**
+- NUNCA desactivar resource blocking.
+- NUNCA descargar imagenes a traves del proxy.
+
+### Budget enforcement (automatico en shared/proxy/bandwidth.py)
+
+- `BandwidthTracker` cuenta bytes reales por portal en tiempo real
+- `BudgetExhausted` detiene el scraping gracefully al alcanzar el limite
+- Logs: buscar `bandwidth.summary` y `bandwidth.warning` events
+- El scraper guarda todo lo recopilado antes de detenerse (no pierde datos)
 
 ### DataImpulse proxy config
-- Provider: DataImpulse residential proxy
-- Country targeting MX adds x2 bandwidth coefficient (required — portals geo-block non-MX IPs)
-- Country + sticky session injected via URL format: `username__cr.mx__sd-SESSION`
-- Plan: 50 GB, with x2 = 25 GB effective
-- NEVER run scrapers without checking remaining budget on DataImpulse dashboard first
 
-### Before running ANY scraper on VPS
-1. Check DataImpulse dashboard for remaining traffic
-2. Check `docker ps -a | grep scraper` for running containers — kill orphans
-3. Use `--budget` flag
-4. Monitor bandwidth in logs: look for `bandwidth.summary` events
+- Provider: DataImpulse residential proxy
+- Country targeting MX: **obligatorio** (portales geo-bloquean IPs no-mexicanas)
+- Coeficiente x2: cada GB real consume 2 GB del plan por targeting MX
+- Plan actual: 50 GB ($50), = 25 GB efectivos
+- URL format: `username__cr.mx__sd-SESSION` (inyectado automaticamente por ProxyManager)
+- Session rotation: cada 3-7 paginas (configurable por portal)
+
+### Before running ANY scraper
+
+1. Verificar trafico restante en DataImpulse dashboard
+2. `docker ps -a | grep scraper` — matar containers huerfanos
+3. Incluir `--budget` flag
+4. Monitorear `bandwidth.summary` en logs
 
 ### Cron jobs (infrastructure/cron/propyte.cron)
-- Daily incremental at 8am UTC with `--budget 200`
-- Monthly full at 6am UTC with `--budget 2000`
-- ALL cron entries MUST include `--budget` flag
+
+- Diario incremental: 8am UTC, `--budget 200 --no-detail`
+- Mensual full: 1ro del mes 6am UTC, `--budget 2000 --no-detail`
+- Semanal enrichment: pendiente de configurar
+- **TODOS los cron entries DEBEN incluir `--budget`**
+
+### Estimaciones de consumo (con resource blocking + MX x2)
+
+| Operacion | MB reales | GB plan (x2) | Listings estimados |
+|-----------|-----------|--------------|-------------------|
+| 1 pagina cards-only | 0.064 MB | 0.000128 GB | 30-47 |
+| 1 pagina detail (30 listings) | 6 MB | 0.012 GB | 30 |
+| Incremental diario (4 portales) | ~50 MB | ~0.1 GB | ~500 nuevos |
+| Full cards-only (4 portales, 32 estados) | ~500 MB | ~1 GB | ~60K |
+| Enrichment selectivo (~20K listings) | ~4 GB | ~8 GB | 20K enriquecidos |
 
 ## Data Flow
-1. Scrapers → raw_listings (VPS PostgreSQL, never leaves VPS)
-2. ETL cleans → clean_listings (still on VPS)
-3. Exporter → S3 bucket (only aggregates + anonymized listings)
-4. Production job → Supabase (serves website)
+
+1. Scrapers (Fase 1: cards) → raw_listings (VPS PostgreSQL, never leaves VPS)
+2. Scrapers (Fase 2: enrich) → raw_listings actualizado con campos de detail
+3. ETL cleans → clean_listings (still on VPS)
+4. Exporter → S3 bucket (only aggregates + anonymized listings)
+5. Production job → Supabase (serves website)

@@ -2,21 +2,33 @@
 # Install: crontab /opt/datamktmx/infrastructure/cron/propyte.cron
 #
 # IMPORTANT: All scraper runs MUST include --budget flag to prevent
-# uncontrolled proxy bandwidth consumption. Resource blocking is in the
-# code but budget is the safety net.
+# uncontrolled proxy bandwidth consumption.
+#
+# Strategy:
+#   Phase 1 (cards-only): daily incremental + monthly full
+#   Phase 2 (enrichment): weekly, only visits listings missing key fields
 #
 # Budget math (DataImpulse, MX targeting x2):
-#   Incremental: ~50 MB real (~100 MB plan) per run
-#   Full: ~500 MB real (~1 GB plan) per run
-#   Monthly plan: 50 GB
+#   Incremental cards: ~50 MB real → ~100 MB plan
+#   Full cards: ~500 MB real → ~1 GB plan
+#   Enrichment: ~200 MB real → ~400 MB plan (selective, only incomplete)
+#   Monthly total: ~4-5 GB plan of 50 GB
+
+# === Phase 1: Cards-only (coverage) ===
 
 # Daily incremental scrape (2am Mexico = 8am UTC)
-# Budget: 200 MB safety cap for incremental (normally uses ~50 MB)
 0 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scheduler.log 2>&1
 
 # Monthly full scrape (1st of month, midnight Mexico = 6am UTC)
-# Budget: 2000 MB (2 GB) safety cap for full scrape
 0 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode full --no-detail --budget 2000 >> /var/log/datamktmx/scheduler.log 2>&1
+
+# === Phase 2: Detail enrichment (selective) ===
+
+# Weekly enrichment — Wednesdays 3am Mexico = 9am UTC
+# Visits detail pages ONLY for listings missing construction_m2, description, or amenities
+0 9 * * 3 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers propiedades --enrich --budget 500 >> /var/log/datamktmx/scheduler.log 2>&1
+
+# === ETL ===
 
 # ETL pipeline (Sunday 4am UTC)
 0 4 * * 0 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler etl >> /var/log/datamktmx/etl.log 2>&1
