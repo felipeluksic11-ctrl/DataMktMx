@@ -146,7 +146,7 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
 
 
 async def run_all_active(mode: str = "full", **kwargs) -> None:
-    """Run scrapers for all active portals sequentially.
+    """Run scrapers for all active portals in parallel.
 
     Args:
         mode: "full" (all pages) or "incremental" (recent only, stop on known)
@@ -160,13 +160,16 @@ async def run_all_active(mode: str = "full", **kwargs) -> None:
         result = await session.execute(stmt)
         portals = result.scalars().all()
 
-    for portal in portals:
-        if portal.slug in SCRAPER_REGISTRY:
-            try:
-                await run_scraper(portal.slug, mode=mode, **kwargs)
-            except Exception:
-                logger.exception("runner.portal_error", slug=portal.slug)
-                continue
+    slugs = [p.slug for p in portals if p.slug in SCRAPER_REGISTRY]
+    logger.info("runner.launching_parallel", portals=slugs, mode=mode)
+
+    async def safe_run(slug: str):
+        try:
+            await run_scraper(slug, mode=mode, **kwargs)
+        except Exception:
+            logger.exception("runner.portal_error", slug=slug)
+
+    await asyncio.gather(*[safe_run(slug) for slug in slugs])
 
     engine = get_engine()
     await engine.dispose()
