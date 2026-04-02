@@ -111,14 +111,15 @@ def _parse_features(feature_texts: list[str]) -> dict:
                 if years:
                     result["antiquity"] = str(years)
                     result["construction_years"] = years
-            # bare "m²" without qualifier
+            # bare "m²" without qualifier — default to construction_m2 first
+            # (most listings show built area as the primary m² figure)
             elif "m²" in text or "m2" in text:
                 val = _extract_float(text)
                 if val:
-                    if result["land_m2"] is None:
-                        result["land_m2"] = val
-                    elif result["construction_m2"] is None:
+                    if result["construction_m2"] is None:
                         result["construction_m2"] = val
+                    elif result["land_m2"] is None:
+                        result["land_m2"] = val
 
     return result
 
@@ -284,24 +285,75 @@ def _detect_property_type(text: str) -> str | None:
 # ──────────────────────────── Search results page ────────────────────────────
 
 
+def _extract_int_from_range(text: str) -> int | None:
+    """Extract first integer from text that may be a range like '1 - 3'."""
+    match = re.search(r"(\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def _extract_float_from_range(text: str) -> float | None:
+    """Extract first float from text that may be a range like '31 - 188 m²'."""
+    match = re.search(r"([\d,]+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _parse_card_hover_data(card_json: str) -> dict:
+    """Parse the data-serp-map-hover-listing JSON attribute from a card.
+
+    Contains: latitude, longitude, priceTag, bedrooms, bathrooms, area,
+    numberOfImages, exactLocation, tags.
+    """
+    result: dict = {}
+    try:
+        data = json.loads(card_json)
+    except (json.JSONDecodeError, TypeError):
+        return result
+
+    if data.get("latitude") and data.get("longitude"):
+        try:
+            result["latitude"] = float(data["latitude"])
+            result["longitude"] = float(data["longitude"])
+        except (ValueError, TypeError):
+            pass
+
+    if data.get("priceTag"):
+        price, currency = _clean_price(data["priceTag"])
+        if price:
+            result["price"] = price
+            result["currency"] = currency
+
+    if data.get("bedrooms"):
+        result["bedrooms"] = _extract_int_from_range(str(data["bedrooms"]))
+    if data.get("bathrooms"):
+        result["bathrooms"] = _extract_int_from_range(str(data["bathrooms"]))
+    if data.get("area"):
+        result["construction_m2"] = _extract_float_from_range(str(data["area"]))
+    if data.get("numberOfImages"):
+        try:
+            result["images_count"] = int(data["numberOfImages"])
+        except (ValueError, TypeError):
+            pass
+
+    return result
+
+
 async def parse_search_results(page: Page) -> list[dict]:
     """Parse listing cards from a Lamudi search results page.
 
-    Scouted selectors (2026-03-31):
-    - Cards: `.property` divs inside `.listings__cards`
-    - Price: `.snippet__content__price`
-    - Location: `.snippet__content__location`
-    - Description: `.snippet__content__description`
-    - Area: `.property__number.area`
-    - Bedrooms: `.property__number.bedrooms`
-    - Bathrooms: `.property__number.bathrooms`
-    - Parking: `.property__number.car_park`
-    - Detail links: `a[href*='/detalle/']`
+    Data sources per card (priority order):
+    1. data-serp-map-hover-listing JSON (lat/lng, price, beds, baths, area, images)
+    2. Specific .property__number.{type} elements (beds, baths, area, parking)
+    3. Text content from card sections (title, description, location)
+    4. data-idanuncio attribute (external ID)
+
+    Detail links: a[href*='/detalle/'] or a[href*='/desarrollo/'] for projects.
     """
-    # Cards are .snippet.js-snippet divs with data-idanuncio
     cards = await page.query_selector_all(".snippet.js-snippet")
-    if not cards:
-        cards = await page.query_selector_all(config.SELECTORS["listing_card"])
     if not cards:
         cards = await page.query_selector_all(config.SELECTORS["listing_card_fallback"])
     if not cards:
@@ -310,10 +362,13 @@ async def parse_search_results(page: Page) -> list[dict]:
 
     results = []
     for card in cards:
-        # Detail URL — scouted: a[href*='/detalle/']
+        # --- External ID ---
+        external_id = await card.get_attribute("data-idanuncio") or await card.get_attribute("data-listing-id")
+
+        # --- Detail URL: /detalle/ (listings) or /desarrollo/ (projects) ---
         link_el = await card.query_selector("a[href*='/detalle/']")
         if not link_el:
-            link_el = await card.query_selector(config.SELECTORS["card_link"])
+            link_el = await card.query_selector("a[href*='/desarrollo/']")
         if not link_el:
             link_el = await card.query_selector("a[href]")
         detail_url = None
@@ -322,14 +377,11 @@ async def parse_search_results(page: Page) -> list[dict]:
             if href:
                 detail_url = href if href.startswith("http") else config.BASE_URL + href
 
-        # External ID from data attribute, then from URL
-        external_id = await card.get_attribute("data-idanuncio") or await card.get_attribute("data-listing-id")
+        # External ID fallback from URL
         if not external_id and detail_url:
-            m = re.search(r"/detalle/([^/]+?)(?:\.html)?$", detail_url)
-            if not m:
-                m = re.search(r"-id-(\d+)", detail_url)
+            m = re.search(r"/(detalle|desarrollo)/([^/]+?)(?:\.html)?$", detail_url)
             if m:
-                external_id = m.group(1)
+                external_id = m.group(2)
             else:
                 import hashlib
                 external_id = hashlib.md5(detail_url.encode()).hexdigest()[:12]
@@ -337,69 +389,75 @@ async def parse_search_results(page: Page) -> list[dict]:
         if not external_id:
             continue
 
-        # Price — scouted: .snippet__content__price → "$ 160,000 MXN /mes"
+        # --- Structured data from card hover JSON (rich source: lat/lng, price, etc.) ---
+        hover_json = await card.get_attribute("data-serp-map-hover-listing")
+        hover_data = _parse_card_hover_data(hover_json) if hover_json else {}
+
+        # --- Price ---
         price_el = await card.query_selector(".snippet__content__price")
-        if not price_el:
-            price_el = await card.query_selector(config.SELECTORS["price"])
         price_text = (await price_el.text_content() or "").strip() if price_el else ""
         price, currency = _clean_price(price_text)
+        # Hover data as fallback
+        price = price or hover_data.get("price")
+        currency = currency or hover_data.get("currency")
 
-        # Features — scouted: individual .property__number.{type} elements
-        feature_texts = []
-
-        area_el = await card.query_selector(".property__number.area")
-        if area_el:
-            feature_texts.append((await area_el.text_content() or "").strip())
+        # --- Features: extract directly by class (elements contain just numbers) ---
+        bedrooms = None
+        bathrooms = None
+        construction_m2 = None
+        parking_spaces = None
 
         bed_el = await card.query_selector(".property__number.bedrooms")
         if bed_el:
-            feature_texts.append((await bed_el.text_content() or "").strip())
+            bedrooms = _extract_int_from_range((await bed_el.text_content() or ""))
 
         bath_el = await card.query_selector(".property__number.bathrooms")
         if bath_el:
-            feature_texts.append((await bath_el.text_content() or "").strip())
+            bathrooms = _extract_int_from_range((await bath_el.text_content() or ""))
+
+        area_el = await card.query_selector(".property__number.area")
+        if area_el:
+            construction_m2 = _extract_float_from_range((await area_el.text_content() or ""))
 
         park_el = await card.query_selector(".property__number.car_park")
         if park_el:
-            feature_texts.append((await park_el.text_content() or "").strip())
+            park_text = (await park_el.text_content() or "")
+            parking_spaces = _extract_int_from_range(park_text)
 
-        # Fallback: config-based feature selectors
-        if not feature_texts:
-            feat_els = await card.query_selector_all(config.SELECTORS["feature_item"])
-            if not feat_els:
-                feat_els = await card.query_selector_all("[class*='feature'] span, [class*='Feature'] span")
-            feature_texts = [(await f.text_content() or "").strip() for f in feat_els]
+        # Hover data fills gaps
+        bedrooms = bedrooms or hover_data.get("bedrooms")
+        bathrooms = bathrooms or hover_data.get("bathrooms")
+        construction_m2 = construction_m2 or hover_data.get("construction_m2")
 
-        features = _parse_features([t for t in feature_texts if t])
-
-        # Location — scouted: .snippet__content__location → "Florida, Álvaro Obregón, Ciudad de México"
+        # --- Location ---
         loc_el = await card.query_selector(".snippet__content__location")
-        if not loc_el:
-            loc_el = await card.query_selector(config.SELECTORS["location"])
         loc_text = (await loc_el.text_content() or "").strip() if loc_el else ""
         location = _parse_location_text(loc_text)
 
-        # Description — scouted: .snippet__content__description
+        # --- Description ---
         desc_el = await card.query_selector(".snippet__content__description")
         description = (await desc_el.text_content() or "").strip() if desc_el else None
         if description:
             description = _clean_whitespace(description)
 
-        # Title
+        # --- Title ---
         title_el = await card.query_selector(config.SELECTORS["card_title"])
         title = (await title_el.text_content() or "").strip() if title_el else None
         if title:
             title = _clean_whitespace(title)
 
-        # Property type from title or URL
+        # --- Property type from title or URL ---
         property_type = None
         if title:
             property_type = _detect_property_type(title)
         if not property_type and detail_url:
             property_type = _detect_property_type(detail_url)
 
-        # Images count
-        images = await card.query_selector_all(config.SELECTORS["card_images"])
+        # --- Images count (from hover data or card images) ---
+        images_count = hover_data.get("images_count", 0)
+        if not images_count:
+            images = await card.query_selector_all(config.SELECTORS["card_images"])
+            images_count = len(images)
 
         results.append({
             "external_id": str(external_id),
@@ -411,8 +469,18 @@ async def parse_search_results(page: Page) -> list[dict]:
             "currency": currency,
             "property_type": property_type,
             **location,
-            **features,
-            "images_count": len(images),
+            "bedrooms": bedrooms,
+            "bathrooms": bathrooms,
+            "half_bathrooms": None,
+            "construction_m2": construction_m2,
+            "land_m2": None,
+            "parking_spaces": parking_spaces,
+            "built_levels": None,
+            "antiquity": None,
+            "construction_years": None,
+            "images_count": images_count,
+            "latitude": hover_data.get("latitude"),
+            "longitude": hover_data.get("longitude"),
         })
 
     logger.info("parser.cards_parsed", count=len(results), url=page.url)

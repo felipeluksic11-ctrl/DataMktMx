@@ -164,11 +164,12 @@ class LamudiScraper(BaseScraper):
         if not self.visit_detail:
             return [self._partial_to_item(p) for p in partials]
 
-        # Visit detail pages for richer data
+        # Visit detail pages for richer data (only /detalle/ URLs, not /desarrollo/)
         items: list[ScrapedItem] = []
         for partial in partials:
             detail_url = partial.get("detail_url")
-            if not detail_url:
+            # Skip detail visit for project/desarrollo URLs or missing URLs
+            if not detail_url or "/desarrollo/" in detail_url:
                 items.append(self._partial_to_item(partial))
                 continue
 
@@ -216,12 +217,15 @@ class LamudiScraper(BaseScraper):
             municipality=p.get("municipality"),
             state=p.get("state"),
             country="Mexico",
+            latitude=p.get("latitude"),
+            longitude=p.get("longitude"),
             bedrooms=p.get("bedrooms"),
             bathrooms=p.get("bathrooms"),
             half_bathrooms=p.get("half_bathrooms"),
             parking_spaces=p.get("parking_spaces"),
             construction_m2=p.get("construction_m2"),
             land_m2=p.get("land_m2"),
+            images_count=p.get("images_count", 0),
             antiquity=p.get("antiquity"),
             built_levels=p.get("built_levels"),
         )
