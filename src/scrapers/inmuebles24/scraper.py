@@ -190,11 +190,12 @@ class Inmuebles24Scraper(BaseScraper):
         if not self.visit_detail:
             return [self._partial_to_item(p) for p in partials]
 
-        # Visit detail pages for richer data
+        # Visit detail pages for richer data (m², antiquity, amenities, etc.)
         items: list[ScrapedItem] = []
         for partial in partials:
             detail_url = partial.get("detail_url")
             if not detail_url:
+                items.append(self._partial_to_item(partial))
                 continue
 
             detail_page = await page.context.new_page()
@@ -202,17 +203,13 @@ class Inmuebles24Scraper(BaseScraper):
                 await detail_page.goto(
                     detail_url,
                     wait_until="domcontentloaded",
-                    timeout=config.PAGE_LOAD_TIMEOUT_MS,
+                    timeout=15000,  # 15s timeout for details (faster than search pages)
                 )
                 item = await parse_detail_page(detail_page, partial)
                 items.append(item)
 
-                await asyncio.sleep(
-                    random.uniform(
-                        config.REQUEST_DELAY_MIN_MS / 1000,
-                        config.REQUEST_DELAY_MAX_MS / 1000,
-                    )
-                )
+                # Shorter delay between detail visits (same session, less suspicious)
+                await asyncio.sleep(random.uniform(0.5, 1.5))
             except Exception:
                 self.stats["errors"] += 1
                 self.logger.exception("scraper.detail_error", url=detail_url)
