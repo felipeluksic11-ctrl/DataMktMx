@@ -37,7 +37,7 @@ class ProxyConfig:
     provider: ProxyProvider
     proxy_type: ProxyType
     url_template: str  # URL with {session} placeholder for sticky sessions
-    country: str = "mx"  # target country code
+    country: str = ""  # empty = no country targeting (no x2 cost multiplier)
     enabled: bool = True
     max_concurrent: int = 10
     avg_cost_per_gb: float = 0.0  # USD

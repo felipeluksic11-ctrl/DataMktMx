@@ -159,8 +159,7 @@ Proxy traffic costs real money ($1/GB). Every scraper run MUST be bandwidth-cons
 
 ### Resource blocking (automatico en shared/stealth/browser.py)
 
-- Bloqueado: imagenes, fonts, media, trackers (google-analytics, facebook, hotjar, etc.)
-- Resultado: ~64 KB/pagina (vs ~2.5 MB sin blocking). **40x ahorro.**
+- Bloqueado: imagenes, fonts, media, stylesheets, trackers (google-analytics, facebook, hotjar, etc.)
 - NUNCA desactivar resource blocking.
 - NUNCA descargar imagenes a traves del proxy.
 
@@ -173,11 +172,13 @@ Proxy traffic costs real money ($1/GB). Every scraper run MUST be bandwidth-cons
 
 ### DataImpulse proxy config
 
-- Provider: DataImpulse residential proxy
-- Country targeting MX: **obligatorio** (portales geo-bloquean IPs no-mexicanas)
-- Coeficiente x2: cada GB real consume 2 GB del plan por targeting MX
-- Plan actual: 50 GB ($50), = 25 GB efectivos
-- URL format: `username__cr.mx__sd-SESSION` (inyectado automaticamente por ProxyManager)
+- Provider: DataImpulse residential proxy, plan 50 GB ($50)
+- **SIN country targeting** — no hay coeficiente x2. 1 GB usado = 1 GB del plan.
+- El panel de DataImpulse debe estar en "Segmentacion predeterminada" sin pais seleccionado
+- El codigo NO inyecta `__cr.mx` en la URL (ProxyManager.country = "")
+- Propiedades.com y Lamudi funcionan con IPs de cualquier pais
+- Inmuebles24 requiere IPs mexicanas (geo-bloquea) — resolver en branch `scraper/inmuebles24-cloudflare`
+- Sticky sessions via URL: `username__sd-SESSION` (sin __cr)
 - Session rotation: cada 3-7 paginas (configurable por portal)
 
 ### Before running ANY scraper
@@ -191,18 +192,24 @@ Proxy traffic costs real money ($1/GB). Every scraper run MUST be bandwidth-cons
 
 - Diario incremental: 8am UTC, `--budget 200 --no-detail`
 - Mensual full: 1ro del mes 6am UTC, `--budget 2000 --no-detail`
-- Semanal enrichment: pendiente de configurar
+- Semanal enrichment: miercoles 9am UTC, `--enrich --budget 500`
 - **TODOS los cron entries DEBEN incluir `--budget`**
 
-### Estimaciones de consumo (con resource blocking + MX x2)
+### Estimaciones de consumo (medido, sin x2)
 
-| Operacion | MB reales | GB plan (x2) | Listings estimados |
-|-----------|-----------|--------------|-------------------|
-| 1 pagina cards-only | 0.064 MB | 0.000128 GB | 30-47 |
-| 1 pagina detail (30 listings) | 6 MB | 0.012 GB | 30 |
-| Incremental diario (4 portales) | ~50 MB | ~0.1 GB | ~500 nuevos |
-| Full cards-only (4 portales, 32 estados) | ~500 MB | ~1 GB | ~60K |
-| Enrichment selectivo (~20K listings) | ~4 GB | ~8 GB | 20K enriquecidos |
+Dato clave medido: **~4.34 MB por pagina de busqueda** (con resource blocking).
+Esto incluye HTML + JS. No baja a menos sin romper funcionalidad.
+
+| Operacion | GB plan | Listings estimados |
+|-----------|---------|-------------------|
+| 1 pagina cards-only | 0.004 GB | 30-47 |
+| Incremental diario (20 paginas × 4 portales) | ~0.35 GB | ~500 nuevos |
+| Full cards-only Propiedades (850 paginas) | ~3.6 GB | ~40K |
+| Full cards-only otros portales (1,332 paginas) | ~5.7 GB | ~40K |
+| Enrichment 10K details | ~2 GB | 10K enriquecidos |
+| **Total mensual estimado** | **~20 GB** | — |
+| **Plan disponible** | **50 GB** | — |
+| **Margen** | **~30 GB** | — |
 
 ## Data Flow
 

@@ -16,9 +16,10 @@ from shared.stealth.identity import WorkerIdentity, create_identity
 
 logger = get_logger("stealth.browser")
 
-# Resources to block — saves ~80% bandwidth
-# NOTE: keep "stylesheet" and "script" allowed — Cloudflare challenges need them
-BLOCKED_RESOURCE_TYPES = {"image", "font", "media", "imageset"}
+# Resources to block — saves bandwidth
+# NOTE: keep "script" allowed — Cloudflare challenges and SPA rendering need JS
+# Stylesheets blocked — not needed for data extraction, saves ~1-2 MB/page
+BLOCKED_RESOURCE_TYPES = {"image", "font", "media", "imageset", "stylesheet"}
 BLOCKED_URL_PATTERNS = [
     "google-analytics", "googletagmanager", "facebook.net",
     "doubleclick", "adservice", "hotjar", "clarity.ms",
