@@ -131,6 +131,20 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
                 **total_stats,
             )
 
+            # Run supervisor check if API key is configured
+            if settings.anthropic_api_key:
+                try:
+                    from supervisors.scrape_supervisor import ScrapeSupervisor
+                    async with session_factory() as q_session:
+                        quality = await check_quality(q_session, portal.id, portal_slug, job.id)
+                    if quality.get("warnings"):
+                        supervisor = ScrapeSupervisor()
+                        await supervisor.check_and_repair(
+                            portal_slug, portal.id, quality
+                        )
+                except Exception:
+                    logger.exception("runner.supervisor_error", portal=portal_slug)
+
         except Exception as e:
             job.status = "failed"
             job.error_detail = str(e)[:2000]
