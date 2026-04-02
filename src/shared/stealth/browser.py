@@ -5,19 +5,35 @@ Each worker gets its own browser instance with:
 - Unique proxy session (from ProxyManager)
 - Unique viewport, timezone, locale (from WorkerIdentity)
 - Camoufox's built-in fingerprint randomization
-- uBlock Origin to block trackers
+- Resource blocking (images, fonts, media) to save proxy bandwidth
+- Real-time bandwidth tracking with budget enforcement
 """
 
 from shared.logging import get_logger
+from shared.proxy.bandwidth import BandwidthTracker
 from shared.proxy.manager import ProxyManager, ProxySession
 from shared.stealth.identity import WorkerIdentity, create_identity
 
 logger = get_logger("stealth.browser")
 
+# Resources to block — saves ~80% bandwidth
+# NOTE: keep "stylesheet" and "script" allowed — Cloudflare challenges need them
+BLOCKED_RESOURCE_TYPES = {"image", "font", "media", "imageset"}
+BLOCKED_URL_PATTERNS = [
+    "google-analytics", "googletagmanager", "facebook.net",
+    "doubleclick", "adservice", "hotjar", "clarity.ms",
+    "sentry.io", "newrelic", "segment.com",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+    ".mp4", ".webm", ".mp3", ".ogg",
+    ".pdf", ".zip",
+]
+
 
 async def create_worker_browser(
     identity: WorkerIdentity,
     proxy_session: ProxySession | None = None,
+    portal_slug: str = "unknown",
 ):
     """Create a stealth browser + context for a specific worker.
 
@@ -46,7 +62,6 @@ async def create_worker_browser(
         )
 
     # Launch Camoufox — proxy must be passed both to launch AND context
-    # Some versions of Camoufox/Playwright only respect proxy in context
     proxy_dict = launch_kwargs.pop("proxy", None)
 
     camoufox = AsyncCamoufox(**launch_kwargs)
@@ -65,27 +80,62 @@ async def create_worker_browser(
     context.set_default_timeout(identity.page_timeout_ms)
     context.set_default_navigation_timeout(identity.navigation_timeout_ms)
 
+    # Bandwidth tracker
+    tracker = BandwidthTracker.get_instance()
+
+    # Block heavy resources to save proxy bandwidth
+    async def _block_resources(route):
+        request = route.request
+        if request.resource_type in BLOCKED_RESOURCE_TYPES:
+            tracker.add_blocked()
+            await route.abort()
+            return
+        url = request.url.lower()
+        if any(pattern in url for pattern in BLOCKED_URL_PATTERNS):
+            tracker.add_blocked()
+            await route.abort()
+            return
+        await route.continue_()
+
+    await context.route("**/*", _block_resources)
+
+    # Track response sizes for bandwidth monitoring
+    async def _track_response(response):
+        try:
+            body = await response.body()
+            byte_count = len(body)
+            tracker.add_bytes(byte_count, portal=portal_slug)
+        except Exception:
+            # Some responses (redirects, aborted) don't have a body
+            pass
+
+    context.on("response", _track_response)
+
     logger.info(
         "browser.created",
         worker=identity.worker_id,
         viewport=f"{identity.viewport_width}x{identity.viewport_height}",
         timezone=identity.timezone,
         locale=identity.locale,
+        resource_blocking="enabled",
     )
 
     return browser, context
 
 
-async def create_stealth_browser(config=None, proxy_manager=None):
-    """Legacy wrapper — creates a browser with default identity.
+async def create_stealth_browser(config=None, proxy_manager=None, portal_slug="unknown"):
+    """Create a browser with a random unique identity.
 
-    Use create_worker_browser() for distributed scraping.
+    Each call gets a unique worker_id seed, producing different
+    viewport, timezone, locale, and delay profiles.
     """
-    identity = create_identity("default")
+    import random as _rng
+    # Unique seed per browser instance — different fingerprint each time
+    worker_id = f"w-{_rng.randint(100000, 999999)}"
+    identity = create_identity(worker_id)
     if config:
         identity.headless = config.headless
-        identity.viewport_width = config.viewport_width
-        identity.viewport_height = config.viewport_height
+        # DON'T override viewport — use the randomized one from identity
         identity.page_timeout_ms = config.timeout_ms
         identity.navigation_timeout_ms = config.navigation_timeout_ms
 
@@ -93,7 +143,7 @@ async def create_stealth_browser(config=None, proxy_manager=None):
     if proxy_manager and proxy_manager.has_proxies:
         proxy_session = proxy_manager.create_session("default")
 
-    return await create_worker_browser(identity, proxy_session)
+    return await create_worker_browser(identity, proxy_session, portal_slug=portal_slug)
 
 
 # Keep BrowserConfig for backward compat

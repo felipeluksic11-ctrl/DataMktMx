@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # Proxy
     proxy_dataimplulse_url: str = ""
     proxy_brightdata_url: str = ""
+    proxy_budget_mb: float = 500.0  # max MB per scrape session (default 500 MB)
 
     # Anthropic
     anthropic_api_key: str = ""

@@ -1,15 +1,17 @@
-"""Vivanuncios scraper — reuses Inmuebles24 parser since same frontend."""
+"""Vivanuncios scraper — reuses Inmuebles24 parser since same frontend.
+
+Uses BaseScraper's proxy session rotation to avoid anti-bot detection.
+"""
 
 import asyncio
 import random
 
-from playwright.async_api import Page, BrowserContext
+from playwright.async_api import Page
 
 from scrapers.base import BaseScraper, ScrapedItem
 from scrapers.inmuebles24.parser import parse_search_results, parse_detail_page
 from scrapers.vivanuncios import config
 from shared.proxy.manager import ProxyManager
-from shared.stealth.browser import BrowserConfig, create_stealth_browser
 
 
 class VivanunciosScraper(BaseScraper):
@@ -44,13 +46,10 @@ class VivanunciosScraper(BaseScraper):
         items: list[ScrapedItem] = []
 
         for state in self.states:
-            browser, context = await create_stealth_browser(
-                config=BrowserConfig(headless=True),
-                proxy_manager=self.proxy_manager,
-            )
+            await self._init_browser_for_state()
             try:
                 for operation in self.operations:
-                    search_items = await self._scrape_search(context, state, operation)
+                    search_items = await self._scrape_search(state, operation)
                     items.extend(search_items)
                     self.logger.info(
                         "scraper.search_done",
@@ -60,17 +59,18 @@ class VivanunciosScraper(BaseScraper):
                 self.stats["errors"] += 1
                 self.logger.exception("scraper.state_error", state=state)
             finally:
-                await context.close()
-                await browser.close()
+                await self._close_browser()
 
         return items
 
-    async def _scrape_search(self, context: BrowserContext, state: str, operation: str) -> list[ScrapedItem]:
+    async def _scrape_search(self, state: str, operation: str) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []
 
         for page_num in range(1, self.max_pages + 1):
+            await self._maybe_rotate()
+
             url = self._build_url(state, operation, page_num)
-            page = await context.new_page()
+            page = await self._current_context.new_page()
             try:
                 response = await page.goto(url, wait_until="domcontentloaded", timeout=config.PAGE_LOAD_TIMEOUT_MS)
                 if not response or response.status >= 400:
@@ -102,7 +102,7 @@ class VivanunciosScraper(BaseScraper):
                         detail_url = partial.get("detail_url")
                         if not detail_url:
                             continue
-                        detail_page = await context.new_page()
+                        detail_page = await self._current_context.new_page()
                         try:
                             await detail_page.goto(detail_url, wait_until="domcontentloaded", timeout=config.PAGE_LOAD_TIMEOUT_MS)
                             item = await parse_detail_page(detail_page, partial)
@@ -120,9 +120,10 @@ class VivanunciosScraper(BaseScraper):
                     items.extend([self._partial_to_item(p) for p in partials])
 
                 if self.on_page_scraped:
-                    page_items_viv = items[-len(partials):]  # items just added
+                    page_items_viv = items[-len(partials):]
                     await self.on_page_scraped(page_items_viv)
 
+                self._pages_since_rotation += 1
                 self.logger.info("scraper.page_done", page=page_num, count=len(partials), total=len(items))
                 await asyncio.sleep(random.uniform(
                     config.REQUEST_DELAY_MIN_MS / 1000,

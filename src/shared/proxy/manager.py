@@ -42,9 +42,36 @@ class ProxyConfig:
     max_concurrent: int = 10
     avg_cost_per_gb: float = 0.0  # USD
 
-    def build_url(self, session_id: str = "") -> str:
-        """Build a proxy URL with a unique session ID for sticky sessions."""
-        return self.url_template.replace("{session}", session_id)
+    def build_url(self, session_id: str = "", country: str = "") -> str:
+        """Build a proxy URL with country targeting and sticky session.
+
+        DataImpulse URL format:
+          http://USER__cr.COUNTRY__sd-SESSION:PASS@HOST:PORT
+
+        Country targeting adds x2 bandwidth coefficient but is required
+        for portals that geo-block non-local IPs (e.g. Inmuebles24).
+        """
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(self.url_template)
+        username = parsed.username or ""
+
+        # Strip any existing __cr or __sd suffixes from username
+        base_user = username.split("__")[0]
+
+        # Build suffix: country + session
+        suffix = ""
+        target_country = country or self.country
+        if target_country:
+            suffix += f"__cr.{target_country}"
+        if session_id:
+            suffix += f"__sd-{session_id}"
+
+        new_username = base_user + suffix
+
+        # Rebuild URL with new username
+        netloc = f"{new_username}:{parsed.password}@{parsed.hostname}:{parsed.port}"
+        return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
 
 
 @dataclass

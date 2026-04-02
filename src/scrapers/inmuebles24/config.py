@@ -282,7 +282,14 @@ ANTIQUITY_MAP = {
 
 # Scraping behavior
 MAX_PAGES_PER_SEARCH = 50
-REQUEST_DELAY_MIN_MS = 2000
-REQUEST_DELAY_MAX_MS = 5000
+REQUEST_DELAY_MIN_MS = 3000
+REQUEST_DELAY_MAX_MS = 8000
 PAGE_LOAD_TIMEOUT_MS = 30000
 MAX_RETRIES = 3
+
+# Anti-bot: rotate proxy session every N pages to avoid detection
+SESSION_ROTATE_MIN_PAGES = 3
+SESSION_ROTATE_MAX_PAGES = 5
+# Extra delay after session rotation (new IP needs a "warm-up" request)
+SESSION_ROTATE_DELAY_MIN_S = 5.0
+SESSION_ROTATE_DELAY_MAX_S = 10.0

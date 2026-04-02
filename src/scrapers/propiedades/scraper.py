@@ -1,15 +1,17 @@
-"""Propiedades.com scraper — crawls search results and detail pages."""
+"""Propiedades.com scraper — crawls search results and detail pages.
+
+Uses BaseScraper's proxy session rotation to avoid anti-bot detection.
+"""
 
 import asyncio
 import random
 
-from playwright.async_api import Page, BrowserContext
+from playwright.async_api import Page
 
 from scrapers.base import BaseScraper, ScrapedItem
 from scrapers.propiedades import config
 from scrapers.propiedades.parser import parse_search_results, parse_detail_page
 from shared.proxy.manager import ProxyManager
-from shared.stealth.browser import BrowserConfig, create_stealth_browser
 
 
 class PropiedadesScraper(BaseScraper):
@@ -39,14 +41,11 @@ class PropiedadesScraper(BaseScraper):
         items: list[ScrapedItem] = []
 
         for state in self.states:
-            browser, context = await create_stealth_browser(
-                config=BrowserConfig(headless=True),
-                proxy_manager=self.proxy_manager,
-            )
+            await self._init_browser_for_state()
             try:
                 for operation in self.operations:
                     search_items = await self._scrape_search(
-                        context, state, operation
+                        state, operation
                     )
                     items.extend(search_items)
                     self.logger.info(
@@ -59,14 +58,12 @@ class PropiedadesScraper(BaseScraper):
                 self.stats["errors"] += 1
                 self.logger.exception("scraper.state_error", state=state)
             finally:
-                await context.close()
-                await browser.close()
+                await self._close_browser()
 
         return items
 
     async def _scrape_search(
         self,
-        context: BrowserContext,
         state: str,
         operation: str,
     ) -> list[ScrapedItem]:
@@ -75,13 +72,15 @@ class PropiedadesScraper(BaseScraper):
         op_slug = config.OPERATIONS.get(operation, operation)
 
         for page_num in range(1, self.max_pages + 1):
+            await self._maybe_rotate()
+
             url = config.SEARCH_URL_TEMPLATE.format(
                 operation=op_slug,
                 state=state,
                 page=page_num,
             )
 
-            page = await context.new_page()
+            page = await self._current_context.new_page()
             try:
                 page_items = await self._scrape_search_page(
                     page, url, operation, state=state
@@ -95,6 +94,8 @@ class PropiedadesScraper(BaseScraper):
                     await self.on_page_scraped(page_items)
 
                 items.extend(page_items)
+                self._pages_since_rotation += 1
+
                 self.logger.info(
                     "scraper.page_done",
                     page=page_num,

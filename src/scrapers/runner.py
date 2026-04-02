@@ -16,6 +16,7 @@ from shared.config import settings
 from shared.db.models import Portal, ScrapeJob
 from shared.db.session import get_engine, get_session_factory
 from shared.logging import get_logger, setup_logging
+from shared.proxy.bandwidth import BandwidthTracker, BudgetExhausted
 from shared.proxy.manager import ProxyManager
 
 logger = get_logger("scraper.runner")
@@ -38,6 +39,14 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
         **kwargs: passed to the scraper constructor (states, operations, etc.)
     """
     setup_logging()
+
+    # Initialize bandwidth tracker with budget from settings
+    tracker = BandwidthTracker.get_instance(budget_mb=settings.proxy_budget_mb)
+    logger.info(
+        "runner.budget_set",
+        budget_mb=settings.proxy_budget_mb,
+        portal=portal_slug,
+    )
 
     scraper_cls = SCRAPER_REGISTRY.get(portal_slug)
     if not scraper_cls:
@@ -145,14 +154,38 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
                 except Exception:
                     logger.exception("runner.supervisor_error", portal=portal_slug)
 
+        except BudgetExhausted as e:
+            # Budget exceeded — save what we have, don't raise
+            job.total_scraped = total_stats["new"] + total_stats["updated"]
+            job.total_new = total_stats["new"]
+            job.total_updated = total_stats["updated"]
+            job.total_errors = total_stats["errors"]
+            job.status = "stopped_budget"
+            job.error_detail = str(e)
+            job.finished_at = datetime.datetime.now(datetime.UTC)
+            await session.commit()
+            tracker.log_summary()
+            logger.warning(
+                "runner.budget_stop",
+                job_id=job.id,
+                portal=portal_slug,
+                used_mb=e.used_mb,
+                budget_mb=e.budget_mb,
+                items_saved=job.total_scraped,
+            )
+
         except Exception as e:
             job.status = "failed"
             job.error_detail = str(e)[:2000]
             job.total_errors = (job.total_errors or 0) + 1
             job.finished_at = datetime.datetime.now(datetime.UTC)
             await session.commit()
+            tracker.log_summary()
             logger.exception("runner.job_failed", job_id=job.id, portal=portal_slug)
             raise
+
+    # Log final bandwidth stats
+    tracker.log_summary()
 
     # Dispose engine
     engine = get_engine()
@@ -219,14 +252,38 @@ def main() -> None:
         visit_detail = False
         args.remove("--no-detail")
 
+    states = None
+    if "--states" in args:
+        idx = args.index("--states")
+        if idx + 1 < len(args):
+            states = [s.strip() for s in args[idx + 1].split(",")]
+            args = args[:idx] + args[idx + 2:]
+        else:
+            args = args[:idx]
+
+    budget_mb = None
+    if "--budget" in args:
+        idx = args.index("--budget")
+        if idx + 1 < len(args):
+            budget_mb = float(args[idx + 1])
+            args = args[:idx] + args[idx + 2:]
+        else:
+            args = args[:idx]
+
+    # Initialize bandwidth tracker with budget
+    if budget_mb:
+        BandwidthTracker.get_instance(budget_mb=budget_mb)
+
     portal_slug = args[0] if args else None
     kwargs = {"visit_detail": visit_detail}
+    if states:
+        kwargs["states"] = states
 
     if portal_slug:
-        logger.info("runner.starting_single", portal=portal_slug, mode=mode, visit_detail=visit_detail)
+        logger.info("runner.starting_single", portal=portal_slug, mode=mode, visit_detail=visit_detail, states=states, budget_mb=budget_mb)
         asyncio.run(run_scraper(portal_slug, mode=mode, **kwargs))
     else:
-        logger.info("runner.starting_all", mode=mode, visit_detail=visit_detail)
+        logger.info("runner.starting_all", mode=mode, visit_detail=visit_detail, budget_mb=budget_mb)
         asyncio.run(run_all_active(mode=mode, **kwargs))
 
 
