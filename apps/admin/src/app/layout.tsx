@@ -7,7 +7,7 @@ import { AutoRefresh } from '@/components/auto-refresh';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Propyte Admin',
+  title: 'DataMktMx Admin',
   description: 'Data mining control dashboard',
 };
 

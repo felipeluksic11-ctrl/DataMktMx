@@ -11,8 +11,8 @@ async function bootstrap() {
   app.enableCors();
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Propyte Admin API')
-    .setDescription('Internal API for the Propyte data mining admin dashboard')
+    .setTitle('DataMktMx Admin API')
+    .setDescription('Internal API for the DataMktMx data mining admin dashboard')
     .setVersion('0.1.0')
     .addBearerAuth()
     .build();

@@ -18,7 +18,7 @@ export function Sidebar() {
     <aside className="fixed inset-y-0 left-0 z-50 flex w-56 flex-col border-r border-border bg-card">
       <div className="flex h-14 items-center border-b border-border px-6">
         <Link href="/" className="text-lg font-bold tracking-tight text-foreground">
-          Propyte
+          DataMktMx
         </Link>
       </div>
       <nav className="flex-1 space-y-1 px-3 py-4">

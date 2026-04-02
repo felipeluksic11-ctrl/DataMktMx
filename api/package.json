@@ -1,8 +1,8 @@
 {
-  "name": "propyte-api",
+  "name": "datamktmx-api",
   "version": "0.1.0",
   "private": true,
-  "description": "Propyte admin API — NestJS backend",
+  "description": "DataMktMx admin API — NestJS backend",
   "scripts": {
     "build": "nest build",
     "start": "nest start",
