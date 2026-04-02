@@ -1,19 +1,24 @@
 # DataMktMx — Cron Schedule
 # Install: crontab /opt/datamktmx/infrastructure/cron/propyte.cron
 #
-# Strategy: daily incremental + monthly full
-# Incremental: sort by recent, stop on known (~0.86GB/day, ~30min)
-# Full: all pages, detect removed listings (~1.2GB cards, ~12hrs)
+# IMPORTANT: All scraper runs MUST include --budget flag to prevent
+# uncontrolled proxy bandwidth consumption. Resource blocking is in the
+# code but budget is the safety net.
+#
+# Budget math (DataImpulse, MX targeting x2):
+#   Incremental: ~50 MB real (~100 MB plan) per run
+#   Full: ~500 MB real (~1 GB plan) per run
+#   Monthly plan: 50 GB
 
 # Daily incremental scrape (2am Mexico = 8am UTC)
-# Uses runner (no Dramatiq/Redis dependency — runs portals sequentially)
-0 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode incremental >> /var/log/datamktmx/scheduler.log 2>&1
+# Budget: 200 MB safety cap for incremental (normally uses ~50 MB)
+0 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scheduler.log 2>&1
 
 # Monthly full scrape (1st of month, midnight Mexico = 6am UTC)
-0 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode full >> /var/log/datamktmx/scheduler.log 2>&1
+# Budget: 2000 MB (2 GB) safety cap for full scrape
+0 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers --mode full --no-detail --budget 2000 >> /var/log/datamktmx/scheduler.log 2>&1
 
 # ETL pipeline (Sunday 4am UTC)
-# Uses scheduler's etl-only path (no Dramatiq dependency)
 0 4 * * 0 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler etl >> /var/log/datamktmx/etl.log 2>&1
 
 # Log rotation

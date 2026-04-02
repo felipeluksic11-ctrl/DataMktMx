@@ -89,6 +89,47 @@ cd api && npm run test                  # Tests
 - Pre-commit hooks: gitleaks blocks exposed secrets
 - Secrets encrypted with SOPS + age
 
+## Proxy & Bandwidth Rules (CRITICAL)
+
+Proxy traffic costs real money. Every scraper run MUST be bandwidth-conscious.
+
+### Mandatory for ALL scraper runs
+- **ALWAYS use `--budget` flag** when running scrapers manually or via cron. No exceptions.
+  - Test runs: `--budget 30` (30 MB)
+  - Incremental: `--budget 200` (200 MB)
+  - Full scrape: `--budget 2000` (2 GB)
+- **ALWAYS use `--no-detail`** unless detail pages are explicitly needed
+- **ALWAYS use `--states` for testing** — never run a full 32-state test
+
+### Resource blocking (automatic)
+- Images, fonts, media, trackers are blocked in Playwright (see `shared/stealth/browser.py`)
+- This reduces per-page transfer from ~2.5 MB to ~100-200 KB
+- NEVER disable resource blocking
+- NEVER download images through the proxy
+
+### Budget enforcement
+- `BandwidthTracker` (shared/proxy/bandwidth.py) counts real bytes per portal
+- `BudgetExhausted` exception stops scraping gracefully when limit is reached
+- Budget is set via `--budget` CLI flag or `PROXY_BUDGET_MB` env var (default 500 MB)
+
+### DataImpulse proxy config
+- Provider: DataImpulse residential proxy
+- Country targeting MX adds x2 bandwidth coefficient (required — portals geo-block non-MX IPs)
+- Country + sticky session injected via URL format: `username__cr.mx__sd-SESSION`
+- Plan: 50 GB, with x2 = 25 GB effective
+- NEVER run scrapers without checking remaining budget on DataImpulse dashboard first
+
+### Before running ANY scraper on VPS
+1. Check DataImpulse dashboard for remaining traffic
+2. Check `docker ps -a | grep scraper` for running containers — kill orphans
+3. Use `--budget` flag
+4. Monitor bandwidth in logs: look for `bandwidth.summary` events
+
+### Cron jobs (infrastructure/cron/propyte.cron)
+- Daily incremental at 8am UTC with `--budget 200`
+- Monthly full at 6am UTC with `--budget 2000`
+- ALL cron entries MUST include `--budget` flag
+
 ## Data Flow
 1. Scrapers → raw_listings (VPS PostgreSQL, never leaves VPS)
 2. ETL cleans → clean_listings (still on VPS)
