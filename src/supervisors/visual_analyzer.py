@@ -21,101 +21,29 @@ from supervisors.usage_tracker import track_usage
 
 logger = get_logger("supervisor.visual")
 
-ANALYSIS_PROMPT = """You are an expert web scraper analyzer. I'm showing you a screenshot of a real estate listing portal page.
+_ANALYSIS_TEMPLATE = (
+    "You are an expert web scraper analyzer. I'm showing you a screenshot of a real estate listing portal page.\n\n"
+    "## Current Selectors\n{selectors_json}\n\n"
+    "## Current Fill Rates\n{fill_rates_json}\n\n"
+    "## HTML Snippet (first card)\n```html\n{html_snippet}\n```\n\n"
+    "## Task\nAnalyze the screenshot and HTML. For each field (price, bedrooms, bathrooms, half_bathrooms, "
+    "parking_spaces, construction_m2, land_m2, neighborhood, municipality, property_type, antiquity, title), "
+    "describe where it appears visually and what CSS selector captures it.\n\n"
+    "For any field with fill rate below 40%, suggest a repair with a new CSS selector.\n\n"
+    'Respond in JSON with keys: "field_map" (field -> visible/location/selector/confidence), '
+    '"repairs" (field/old_selector/new_selector/pattern/reason), "new_fields" (name/location/selector/description).'
+)
 
-## Current Selectors
-These are the CSS selectors we use to extract data from this portal:
-{selectors_json}
-
-## Current Fill Rates (% of listings where we successfully extract each field)
-{fill_rates_json}
-
-## HTML Snippet (first card)
-```html
-{html_snippet}
-```
-
-## Task
-Analyze the screenshot and HTML to:
-
-1. **Field Map**: For each field below, describe WHERE it appears visually in the screenshot and what CSS selector would capture it:
-   - price (precio)
-   - bedrooms (recámaras)
-   - bathrooms (baños)
-   - half_bathrooms (medio baño)
-   - parking_spaces (estacionamientos)
-   - construction_m2 (m² construidos)
-   - land_m2 (m² terreno/lote)
-   - neighborhood (colonia)
-   - municipality (municipio/delegación)
-   - property_type (tipo de propiedad)
-   - antiquity (antigüedad)
-   - title (título)
-
-2. **Broken Selectors**: Any field with fill rate below 40% likely has a broken selector. For each broken field:
-   - Explain what you see in the screenshot (is the data visible?)
-   - Suggest a new CSS selector based on the HTML
-   - Suggest a text pattern to match (if it's text-based extraction like "3 rec.")
-
-3. **New Fields**: Any data visible in the screenshot that we're NOT extracting yet.
-
-Respond in JSON format:
-```json
-{
-  "field_map": {
-    "price": {"visible": true, "location": "top of card, large text", "selector": "...", "confidence": 0.95},
-    ...
-  },
-  "repairs": [
-    {"field": "bedrooms", "old_selector": "...", "new_selector": "...", "pattern": "...", "reason": "..."},
-    ...
-  ],
-  "new_fields": [
-    {"name": "...", "location": "...", "selector": "...", "description": "..."}
-  ]
-}
-```"""
-
-REPAIR_PROMPT = """You are an expert web scraper repair specialist. A scraper for {portal_name} has degraded performance.
-
-## Problem
-These fields have fill rates below threshold:
-{problems_json}
-
-## Current Selectors
-{selectors_json}
-
-## HTML of a search results page (first 2 cards)
-```html
-{html_snippet}
-```
-
-## Screenshot
-I'm attaching a screenshot of the search results page showing the listing cards.
-
-## Task
-For each problematic field, analyze the HTML and screenshot to determine:
-1. Is the data actually present on the page? (maybe the portal removed it)
-2. If present, what CSS selector or text pattern would extract it?
-3. Provide the exact repair needed.
-
-Respond in JSON:
-```json
-{
-  "repairs": [
-    {
-      "field": "bedrooms",
-      "data_present": true,
-      "new_selector": "li.amenities",
-      "text_pattern": "recámara|recamara|rec\\\\.",
-      "extraction_method": "text_match_int",
-      "confidence": 0.9,
-      "reason": "The bedroom count appears inside li.amenities elements as '2 Recámaras'"
-    }
-  ],
-  "portal_changes_detected": "Description of any layout changes noticed"
-}
-```"""
+_REPAIR_TEMPLATE = (
+    "You are an expert web scraper repair specialist. A scraper for {portal_name} has degraded performance.\n\n"
+    "## Problem\nThese fields have fill rates below threshold:\n{problems_json}\n\n"
+    "## Current Selectors\n{selectors_json}\n\n"
+    "## HTML (first 2 cards)\n```html\n{html_snippet}\n```\n\n"
+    "## Task\nFor each problematic field, analyze the HTML and screenshot to determine:\n"
+    "1. Is the data present on the page?\n2. What CSS selector or text pattern would extract it?\n\n"
+    'Respond in JSON with keys: "repairs" (array of field/data_present/new_selector/text_pattern/'
+    'extraction_method/confidence/reason), "portal_changes_detected" (string description).'
+)
 
 
 class VisualAnalyzer:
@@ -149,7 +77,7 @@ class VisualAnalyzer:
         """
         screenshot_b64 = base64.standard_b64encode(screenshot_bytes).decode("utf-8")
 
-        prompt = ANALYSIS_PROMPT.format(
+        prompt = _ANALYSIS_TEMPLATE.format(
             selectors_json=json.dumps(selectors, indent=2, ensure_ascii=False),
             fill_rates_json=json.dumps(fill_rates or {}, indent=2),
             html_snippet=html_snippet[:4000],
@@ -217,7 +145,7 @@ class VisualAnalyzer:
         """
         screenshot_b64 = base64.standard_b64encode(screenshot_bytes).decode("utf-8")
 
-        prompt = REPAIR_PROMPT.format(
+        prompt = _REPAIR_TEMPLATE.format(
             portal_name=portal_name,
             problems_json=json.dumps(problems, indent=2),
             selectors_json=json.dumps(selectors, indent=2, ensure_ascii=False),
