@@ -1,130 +1,287 @@
 import { fetchAPI } from '@/lib/api';
+import { MetricCard } from '@/components/dashboard/metric-card';
+import { HorizontalBarChart } from '@/components/dashboard/horizontal-bar-chart';
+import { ProgressBar } from '@/components/dashboard/progress-bar';
+import { Panel } from '@/components/dashboard/panel';
+
+interface Stats {
+  totalListings: number;
+  byOperation: { operation: string; count: number }[];
+  byState: { state: string; count: number }[];
+  byPropertyType: { propertyType: string; count: number }[];
+  avgPriceByState: { state: string; avgPrice: number }[];
+}
+
+interface Quality {
+  listingsToday: number;
+  listingsThisWeek: number;
+  fillRates: Record<string, number>;
+  overallCompleteness: number;
+  byPortal: {
+    portalName: string;
+    portalSlug: string;
+    isActive: boolean;
+    listingCount: number;
+    priceFill: number;
+    bedroomsFill: number;
+    bathroomsFill: number;
+    m2Fill: number;
+    neighborhoodFill: number;
+  }[];
+}
 
 interface Portal {
   id: string;
   name: string;
   slug: string;
   isActive: boolean;
-  avgListings: number;
-  lastJobStatus: string | null;
-  lastJobAt: string | null;
+  scrapeJobCount: number;
+  latestJob: { id: string; status: string; createdAt: string } | null;
 }
 
-interface Stats {
-  totalListings: number;
-  activePortals: number;
-  completedJobs: number;
-  lastScrape: string | null;
+function formatRelative(dateStr: string | null): string {
+  if (!dateStr) return 'N/A';
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'ahora';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d`;
 }
 
-async function getStats(): Promise<Stats> {
-  try {
-    return await fetchAPI('/data/stats');
-  } catch {
-    return { totalListings: 0, activePortals: 0, completedJobs: 0, lastScrape: null };
-  }
+function formatCompact(n: number): string {
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toLocaleString()}`;
 }
 
-async function getPortals(): Promise<Portal[]> {
-  try {
-    return await fetchAPI('/portals');
-  } catch {
-    return [];
-  }
-}
+const opColors: Record<string, string> = {
+  venta: 'bg-emerald-500',
+  renta: 'bg-blue-500',
+  vacacional: 'bg-amber-500',
+};
+
+const fieldLabels: Record<string, string> = {
+  price: 'Precio',
+  operation: 'Operacion',
+  property_type: 'Tipo',
+  state: 'Estado',
+  municipality: 'Municipio',
+  neighborhood: 'Colonia',
+  bedrooms: 'Recamaras',
+  bathrooms: 'Banos',
+  construction_m2: 'm2 Const.',
+  land_m2: 'm2 Terreno',
+  parking_spaces: 'Estac.',
+};
 
 export default async function DashboardPage() {
-  const [stats, portals] = await Promise.all([getStats(), getPortals()]);
+  let stats: Stats = { totalListings: 0, byOperation: [], byState: [], byPropertyType: [], avgPriceByState: [] };
+  let quality: Quality = { listingsToday: 0, listingsThisWeek: 0, fillRates: {}, overallCompleteness: 0, byPortal: [] };
+  let portals: Portal[] = [];
 
-  const statCards = [
-    { label: 'Total Listings', value: stats.totalListings.toLocaleString() },
-    { label: 'Portales Activos', value: stats.activePortals },
-    { label: 'Jobs Completados', value: stats.completedJobs },
-    { label: 'Ultimo Scrape', value: stats.lastScrape ? new Date(stats.lastScrape).toLocaleDateString('es-MX') : 'N/A' },
-  ];
+  try {
+    [stats, portals, quality] = await Promise.all([
+      fetchAPI('/data/stats'),
+      fetchAPI('/portals'),
+      fetchAPI('/data/quality'),
+    ]);
+  } catch { /* fallback to defaults */ }
+
+  const activePortals = portals.filter((p) => p.isActive).length;
+  const avgPrice = stats.avgPriceByState.length > 0
+    ? stats.avgPriceByState.reduce((s, r) => s + r.avgPrice, 0) / stats.avgPriceByState.length
+    : 0;
+
+  const lastScrape = portals
+    .map((p) => p.latestJob?.createdAt)
+    .filter(Boolean)
+    .sort()
+    .reverse()[0] || null;
 
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {statCards.map((card) => (
-          <div key={card.label} className="rounded-lg border bg-card p-6">
-            <p className="text-sm text-muted-foreground">{card.label}</p>
-            <p className="mt-1 text-3xl font-bold">{card.value}</p>
-          </div>
-        ))}
+      {/* Row 1: Metric Cards */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <MetricCard
+          label="Total Listings"
+          value={stats.totalListings.toLocaleString()}
+          subValue={`+${quality.listingsToday.toLocaleString()} hoy`}
+          color="emerald"
+        />
+        <MetricCard
+          label="Esta Semana"
+          value={quality.listingsThisWeek.toLocaleString()}
+          color="blue"
+        />
+        <MetricCard
+          label="Portales Activos"
+          value={`${activePortals} / ${portals.length}`}
+          color="violet"
+        />
+        <MetricCard
+          label="Precio Promedio"
+          value={formatCompact(avgPrice)}
+          color="amber"
+        />
+        <MetricCard
+          label="Data Completeness"
+          value={`${quality.overallCompleteness}%`}
+          color="cyan"
+        />
+        <MetricCard
+          label="Ultimo Scrape"
+          value={formatRelative(lastScrape)}
+          color="slate"
+        />
       </div>
 
-      <div className="rounded-lg border bg-card">
-        <div className="border-b px-6 py-4">
-          <h2 className="text-lg font-semibold">Portales</h2>
-        </div>
+      {/* Row 2: Operation + Property Type */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="Por Operacion">
+          <HorizontalBarChart
+            data={stats.byOperation.map((o) => ({
+              label: o.operation.charAt(0).toUpperCase() + o.operation.slice(1),
+              value: o.count,
+              color: opColors[o.operation] || 'bg-slate-500',
+            }))}
+          />
+        </Panel>
+        <Panel title="Por Tipo de Propiedad">
+          <HorizontalBarChart
+            data={stats.byPropertyType.slice(0, 8).map((t) => ({
+              label: t.propertyType,
+              value: t.count,
+            }))}
+          />
+        </Panel>
+      </div>
+
+      {/* Row 3: States + Data Quality */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="Top Estados">
+          <HorizontalBarChart
+            data={stats.byState.slice(0, 12).map((s) => ({
+              label: s.state,
+              value: s.count,
+            }))}
+          />
+        </Panel>
+        <Panel title="Calidad de Datos">
+          <div className="space-y-3">
+            {Object.entries(fieldLabels).map(([key, label]) => (
+              <ProgressBar
+                key={key}
+                label={label}
+                value={quality.fillRates[key] ?? 0}
+              />
+            ))}
+          </div>
+        </Panel>
+      </div>
+
+      {/* Row 4: Portal Performance Table */}
+      <Panel title="Performance por Portal">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-muted-foreground">
-                <th className="px-6 py-3 font-medium">Nombre</th>
-                <th className="px-6 py-3 font-medium">Estado</th>
-                <th className="px-6 py-3 font-medium">Avg Listings</th>
-                <th className="px-6 py-3 font-medium">Ultimo Job</th>
+                <th className="pb-3 font-medium">Portal</th>
+                <th className="pb-3 font-medium">Status</th>
+                <th className="pb-3 font-medium text-right">Listings</th>
+                <th className="pb-3 font-medium text-right">Precio</th>
+                <th className="pb-3 font-medium text-right">Rec.</th>
+                <th className="pb-3 font-medium text-right">Banos</th>
+                <th className="pb-3 font-medium text-right">m2</th>
+                <th className="pb-3 font-medium text-right">Colonia</th>
+                <th className="pb-3 font-medium">Ultimo Job</th>
               </tr>
             </thead>
             <tbody className="divide-y">
-              {portals.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
-                    No hay portales configurados
-                  </td>
-                </tr>
-              ) : (
-                portals.map((portal) => (
-                  <tr key={portal.id}>
-                    <td className="px-6 py-3 font-medium">{portal.name}</td>
-                    <td className="px-6 py-3">
-                      <StatusBadge active={portal.isActive} />
+              {quality.byPortal.map((qp) => {
+                const portal = portals.find((p) => p.slug === qp.portalSlug);
+                return (
+                  <tr key={qp.portalSlug} className="hover:bg-muted/50">
+                    <td className="py-2.5 font-medium">{qp.portalName}</td>
+                    <td className="py-2.5">
+                      <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${qp.isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {qp.isActive ? 'Activo' : 'Inactivo'}
+                      </span>
                     </td>
-                    <td className="px-6 py-3">{portal.avgListings?.toLocaleString() ?? '—'}</td>
-                    <td className="px-6 py-3">
-                      {portal.lastJobStatus ? (
-                        <JobStatusBadge status={portal.lastJobStatus} />
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
+                    <td className="py-2.5 text-right tabular-nums">{qp.listingCount.toLocaleString()}</td>
+                    <td className="py-2.5 text-right"><MiniBar value={qp.priceFill} /></td>
+                    <td className="py-2.5 text-right"><MiniBar value={qp.bedroomsFill} /></td>
+                    <td className="py-2.5 text-right"><MiniBar value={qp.bathroomsFill} /></td>
+                    <td className="py-2.5 text-right"><MiniBar value={qp.m2Fill} /></td>
+                    <td className="py-2.5 text-right"><MiniBar value={qp.neighborhoodFill} /></td>
+                    <td className="py-2.5 text-muted-foreground">
+                      {portal?.latestJob ? (
+                        <span className="flex items-center gap-1.5">
+                          <JobDot status={portal.latestJob.status} />
+                          {formatRelative(portal.latestJob.createdAt)}
+                        </span>
+                      ) : '—'}
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
+              {portals
+                .filter((p) => !quality.byPortal.some((q) => q.portalSlug === p.slug))
+                .map((p) => (
+                  <tr key={p.slug} className="hover:bg-muted/50 text-muted-foreground">
+                    <td className="py-2.5 font-medium text-foreground">{p.name}</td>
+                    <td className="py-2.5">
+                      <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${p.isActive ? 'bg-emerald-500/20 text-emerald-400' : 'bg-rose-500/20 text-rose-400'}`}>
+                        {p.isActive ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </td>
+                    <td className="py-2.5 text-right">0</td>
+                    <td className="py-2.5 text-right">—</td>
+                    <td className="py-2.5 text-right">—</td>
+                    <td className="py-2.5 text-right">—</td>
+                    <td className="py-2.5 text-right">—</td>
+                    <td className="py-2.5 text-right">—</td>
+                    <td className="py-2.5">
+                      {p.latestJob ? (
+                        <span className="flex items-center gap-1.5">
+                          <JobDot status={p.latestJob.status} />
+                          {formatRelative(p.latestJob.createdAt)}
+                        </span>
+                      ) : '—'}
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
         </div>
-      </div>
+      </Panel>
     </div>
   );
 }
 
-function StatusBadge({ active }: { active: boolean }) {
-  return active ? (
-    <span className="inline-flex items-center rounded-full bg-green-500/10 px-2 py-1 text-xs font-medium text-green-400">
-      Activo
-    </span>
-  ) : (
-    <span className="inline-flex items-center rounded-full bg-red-500/10 px-2 py-1 text-xs font-medium text-red-400">
-      Inactivo
-    </span>
+function MiniBar({ value }: { value: number }) {
+  const color = value >= 80 ? 'bg-emerald-500' : value >= 60 ? 'bg-amber-500' : 'bg-rose-500';
+  const textColor = value >= 80 ? 'text-emerald-400' : value >= 60 ? 'text-amber-400' : 'text-rose-400';
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-12 rounded-full bg-secondary">
+        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${value}%` }} />
+      </div>
+      <span className={`text-xs tabular-nums ${textColor}`}>{value}%</span>
+    </div>
   );
 }
 
-function JobStatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    completed: 'bg-green-500/10 text-green-400',
-    running: 'bg-blue-500/10 text-blue-400',
-    pending: 'bg-yellow-500/10 text-yellow-400',
-    failed: 'bg-red-500/10 text-red-400',
+function JobDot({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    completed: 'bg-emerald-500',
+    running: 'bg-blue-500 animate-pulse',
+    pending: 'bg-amber-500',
+    failed: 'bg-rose-500',
   };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${styles[status] ?? 'bg-muted text-muted-foreground'}`}>
-      {status}
-    </span>
-  );
+  return <span className={`inline-block h-2 w-2 rounded-full ${colors[status] || 'bg-slate-500'}`} />;
 }

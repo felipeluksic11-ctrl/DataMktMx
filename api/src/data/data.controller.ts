@@ -159,6 +159,74 @@ export class DataController {
     };
   }
 
+  @Get('quality')
+  async quality() {
+    const [fillRatesResult, byPortalResult, timeResult] = await Promise.all([
+      this.prisma.$queryRaw<[Record<string, unknown>]>`
+        SELECT
+          COUNT(*) as total,
+          ROUND(100.0 * COUNT(price) / NULLIF(COUNT(*), 0), 1) as price,
+          ROUND(100.0 * COUNT(bedrooms) / NULLIF(COUNT(*), 0), 1) as bedrooms,
+          ROUND(100.0 * COUNT(bathrooms) / NULLIF(COUNT(*), 0), 1) as bathrooms,
+          ROUND(100.0 * COUNT(land_m2) / NULLIF(COUNT(*), 0), 1) as land_m2,
+          ROUND(100.0 * COUNT(construction_m2) / NULLIF(COUNT(*), 0), 1) as construction_m2,
+          ROUND(100.0 * COUNT(neighborhood) / NULLIF(COUNT(*), 0), 1) as neighborhood,
+          ROUND(100.0 * COUNT(state) / NULLIF(COUNT(*), 0), 1) as state,
+          ROUND(100.0 * COUNT(municipality) / NULLIF(COUNT(*), 0), 1) as municipality,
+          ROUND(100.0 * COUNT(parking_spaces) / NULLIF(COUNT(*), 0), 1) as parking_spaces,
+          ROUND(100.0 * COUNT(property_type) / NULLIF(COUNT(*), 0), 1) as property_type,
+          ROUND(100.0 * COUNT(operation) / NULLIF(COUNT(*), 0), 1) as operation
+        FROM raw.raw_listings`,
+      this.prisma.$queryRaw<Record<string, unknown>[]>`
+        SELECT
+          p.name as portal_name, p.slug as portal_slug, p.is_active as is_active,
+          COUNT(*) as listing_count,
+          ROUND(100.0 * COUNT(r.price) / NULLIF(COUNT(*), 0), 1) as price_fill,
+          ROUND(100.0 * COUNT(r.bedrooms) / NULLIF(COUNT(*), 0), 1) as bedrooms_fill,
+          ROUND(100.0 * COUNT(r.bathrooms) / NULLIF(COUNT(*), 0), 1) as bathrooms_fill,
+          ROUND(100.0 * COUNT(r.construction_m2) / NULLIF(COUNT(*), 0), 1) as m2_fill,
+          ROUND(100.0 * COUNT(r.neighborhood) / NULLIF(COUNT(*), 0), 1) as neighborhood_fill
+        FROM raw.raw_listings r
+        JOIN public.portals p ON r.portal_id = p.id
+        GROUP BY p.name, p.slug, p.is_active
+        ORDER BY COUNT(*) DESC`,
+      this.prisma.$queryRaw<[{ today: bigint; week: bigint }]>`
+        SELECT
+          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) as today,
+          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE - INTERVAL '7 days') as week
+        FROM raw.raw_listings`,
+    ]);
+
+    const fr = fillRatesResult[0];
+    const fields = ['price', 'bedrooms', 'bathrooms', 'land_m2', 'construction_m2',
+      'neighborhood', 'state', 'municipality', 'parking_spaces', 'property_type', 'operation'];
+    const fillRates: Record<string, number> = {};
+    let sum = 0;
+    for (const f of fields) {
+      const val = Number(fr[f] || 0);
+      fillRates[f] = val;
+      sum += val;
+    }
+
+    return {
+      listingsToday: Number(timeResult[0].today),
+      listingsThisWeek: Number(timeResult[0].week),
+      fillRates,
+      overallCompleteness: Math.round(sum / fields.length),
+      byPortal: byPortalResult.map((r) => ({
+        portalName: r.portal_name,
+        portalSlug: r.portal_slug,
+        isActive: r.is_active,
+        listingCount: Number(r.listing_count),
+        priceFill: Number(r.price_fill),
+        bedroomsFill: Number(r.bedrooms_fill),
+        bathroomsFill: Number(r.bathrooms_fill),
+        m2Fill: Number(r.m2_fill),
+        neighborhoodFill: Number(r.neighborhood_fill),
+      })),
+    };
+  }
+
   @Get('export')
   async exportCsv(
     @Res() res: Response,
