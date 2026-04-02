@@ -17,6 +17,7 @@ import anthropic
 
 from shared.config import settings
 from shared.logging import get_logger
+from supervisors.usage_tracker import track_usage
 
 logger = get_logger("supervisor.visual")
 
@@ -180,6 +181,8 @@ class VisualAnalyzer:
             }],
         )
 
+        track_usage(self.model, response.usage.input_tokens, response.usage.output_tokens, "analysis")
+
         result = self._parse_json_response(response.content[0].text)
 
         logger.info(
@@ -245,6 +248,8 @@ class VisualAnalyzer:
                 ],
             }],
         )
+
+        track_usage(self.model, response.usage.input_tokens, response.usage.output_tokens, "repair")
 
         result = self._parse_json_response(response.content[0].text)
 

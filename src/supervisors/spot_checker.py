@@ -17,6 +17,7 @@ import anthropic
 
 from shared.config import settings
 from shared.logging import get_logger
+from supervisors.usage_tracker import track_usage
 
 logger = get_logger("supervisor.spot_check")
 
@@ -62,7 +63,7 @@ class SpotChecker:
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY not configured")
         self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        self.model = "claude-sonnet-4-20250514"
+        self.model = "claude-haiku-4-5-20251001"  # Haiku for cost efficiency (~$0.002/check)
 
     async def verify_extraction(
         self,
@@ -107,6 +108,13 @@ class SpotChecker:
                     {"type": "text", "text": prompt},
                 ],
             }],
+        )
+
+        track_usage(
+            model=self.model,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
+            purpose="spot_check",
         )
 
         result = self._parse_json(response.content[0].text)

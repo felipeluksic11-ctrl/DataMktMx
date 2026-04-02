@@ -81,12 +81,14 @@ export default async function DashboardPage() {
   let stats: Stats = { totalListings: 0, byOperation: [], byState: [], byPropertyType: [], avgPriceByState: [] };
   let quality: Quality = { listingsToday: 0, listingsThisWeek: 0, fillRates: {}, overallCompleteness: 0, byPortal: [] };
   let portals: Portal[] = [];
+  let aiUsage = { totalCalls: 0, totalCostUsd: 0, todayCostUsd: 0, byPurpose: {} as Record<string, { calls: number; cost: number }> };
 
   try {
-    [stats, portals, quality] = await Promise.all([
+    [stats, portals, quality, aiUsage] = await Promise.all([
       fetchAPI('/data/stats'),
       fetchAPI('/portals'),
       fetchAPI('/data/quality'),
+      fetchAPI('/data/ai-usage').catch(() => aiUsage),
     ]);
   } catch { /* fallback to defaults */ }
 
@@ -106,7 +108,7 @@ export default async function DashboardPage() {
       <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
 
       {/* Row 1: Metric Cards */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         <MetricCard
           label="Total Listings"
           value={stats.totalListings.toLocaleString()}
@@ -132,6 +134,12 @@ export default async function DashboardPage() {
           label="Data Completeness"
           value={`${quality.overallCompleteness}%`}
           color="cyan"
+        />
+        <MetricCard
+          label="AI Supervisor"
+          value={`$${aiUsage.totalCostUsd.toFixed(2)}`}
+          subValue={`${aiUsage.totalCalls} calls | $${aiUsage.todayCostUsd.toFixed(2)} hoy`}
+          color="rose"
         />
         <MetricCard
           label="Ultimo Scrape"

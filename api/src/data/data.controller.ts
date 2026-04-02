@@ -227,6 +227,26 @@ export class DataController {
     };
   }
 
+  @Get('ai-usage')
+  async aiUsage() {
+    // Read usage from shared DB table
+    try {
+      const result = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(`
+        SELECT * FROM public.ai_usage ORDER BY created_at DESC LIMIT 1
+      `);
+      if (result.length > 0) {
+        const row = result[0];
+        return {
+          totalCalls: Number(row.total_calls || 0),
+          totalCostUsd: Number(row.total_cost_usd || 0),
+          todayCostUsd: Number(row.today_cost_usd || 0),
+          byPurpose: row.by_purpose || {},
+        };
+      }
+    } catch {}
+    return { totalCalls: 0, totalCostUsd: 0, todayCostUsd: 0, byPurpose: {} };
+  }
+
   @Get('export')
   async exportCsv(
     @Res() res: Response,
