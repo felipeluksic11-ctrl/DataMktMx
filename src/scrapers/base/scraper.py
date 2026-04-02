@@ -104,6 +104,8 @@ class BaseScraper(abc.ABC):
         self.proxy_manager = proxy_manager or ProxyManager()
         self.logger = get_logger(f"scraper.{self.portal_slug}")
         self.on_page_scraped: OnPageCallback | None = None
+        self.total_items_scraped: int = 0
+        self.spot_check_interval: int = 500  # verify every N items
         self.stats: dict[str, int] = {
             "scraped": 0,
             "errors": 0,

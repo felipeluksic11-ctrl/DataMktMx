@@ -7,6 +7,7 @@ from playwright.async_api import Page, BrowserContext
 
 from scrapers.base import BaseScraper, ScrapedItem
 from scrapers.inmuebles24 import config
+from shared.config import settings
 from scrapers.inmuebles24.parser import parse_search_results, parse_detail_page
 from shared.proxy.manager import ProxyManager
 from shared.stealth.browser import BrowserConfig, create_stealth_browser
@@ -124,6 +125,37 @@ class Inmuebles24Scraper(BaseScraper):
                     await self.on_page_scraped(page_items)
 
                 items.extend(page_items)
+                self.total_items_scraped += len(page_items)
+
+                # Spot check: verify extraction against screenshot every N items
+                if (self.total_items_scraped % self.spot_check_interval < len(page_items)
+                        and page_items and settings.anthropic_api_key):
+                    try:
+                        from supervisors.spot_checker import SpotChecker
+                        screenshot = await page.screenshot(full_page=False)
+                        sample = page_items[0]
+                        checker = SpotChecker()
+                        await checker.verify_extraction(
+                            screenshot_bytes=screenshot,
+                            extracted_data={
+                                "title": sample.title,
+                                "price": sample.price,
+                                "currency": sample.currency,
+                                "bedrooms": sample.bedrooms,
+                                "bathrooms": sample.bathrooms,
+                                "parking_spaces": sample.parking_spaces,
+                                "construction_m2": sample.construction_m2,
+                                "land_m2": sample.land_m2,
+                                "neighborhood": sample.neighborhood,
+                                "municipality": sample.municipality,
+                                "state": sample.state,
+                                "property_type": sample.property_type,
+                            },
+                            portal_name=self.portal_name,
+                        )
+                    except Exception:
+                        self.logger.exception("scraper.spot_check_error")
+
                 self.logger.info(
                     "scraper.page_done",
                     page=page_num,
