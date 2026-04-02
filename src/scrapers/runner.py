@@ -41,11 +41,11 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     """
     setup_logging()
 
-    # Initialize bandwidth tracker with budget from settings
-    tracker = BandwidthTracker.get_instance(budget_mb=settings.proxy_budget_mb)
+    # Get bandwidth tracker (already initialized in main() with correct budget)
+    tracker = BandwidthTracker.get_instance()
     logger.info(
         "runner.budget_set",
-        budget_mb=settings.proxy_budget_mb,
+        budget_mb=tracker.budget_mb,
         portal=portal_slug,
     )
 
@@ -204,7 +204,8 @@ async def run_enrichment(portal_slug: str, **kwargs) -> None:
     """
     setup_logging()
 
-    tracker = BandwidthTracker.get_instance(budget_mb=settings.proxy_budget_mb)
+    # Get bandwidth tracker (already initialized in main() with correct budget)
+    tracker = BandwidthTracker.get_instance()
     logger.info("runner.enrich_start", portal=portal_slug, budget_mb=tracker.budget_mb)
 
     scraper_cls = SCRAPER_REGISTRY.get(portal_slug)
@@ -474,9 +475,8 @@ def main() -> None:
         else:
             args = args[:idx]
 
-    # Initialize bandwidth tracker with budget
-    if budget_mb:
-        BandwidthTracker.get_instance(budget_mb=budget_mb)
+    # Initialize bandwidth tracker with CLI budget or settings default
+    BandwidthTracker.get_instance(budget_mb=budget_mb or settings.proxy_budget_mb)
 
     portal_slug = args[0] if args else None
     kwargs = {"visit_detail": visit_detail}

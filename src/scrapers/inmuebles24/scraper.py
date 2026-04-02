@@ -1,10 +1,12 @@
 """Inmuebles24 scraper — crawls search results and detail pages.
 
-Anti-bot strategy:
-- Fresh browser + proxy session per state
-- Rotate proxy session every 3-5 pages within a state
-- On 403/block: immediate session rotation with backoff
-- Gaussian delays 3-8s between pages (configurable)
+Anti-bot strategy (Chromium + Cloudflare bypass):
+- Uses Playwright Chromium (NOT Camoufox) — CF blocks Firefox headless
+- Fresh browser context per page — clears CF cookies/fingerprint
+- --disable-blink-features=AutomationControlled + navigator.webdriver=undefined
+- Rotate browser (new IP via proxy) every 2-3 pages
+- On 403/block: immediate browser rotation with backoff
+- Delays 4-8s between pages
 """
 
 import asyncio
@@ -17,15 +19,20 @@ from scrapers.inmuebles24 import config
 from shared.config import settings
 from scrapers.inmuebles24.parser import parse_search_results, parse_detail_page
 from shared.proxy.manager import ProxyManager
+from shared.stealth.browser import (
+    BrowserConfig, create_stealth_browser, create_chromium_context,
+    close_browser,
+)
+from shared.stealth.identity import create_identity
 
 
 class Inmuebles24Scraper(BaseScraper):
     portal_slug = "inmuebles24"
     portal_name = "Inmuebles24"
 
-    # I24 is aggressive with anti-bot — rotate more frequently
-    rotate_min_pages = config.SESSION_ROTATE_MIN_PAGES
-    rotate_max_pages = config.SESSION_ROTATE_MAX_PAGES
+    # I24 CF is aggressive — rotate every 2-3 pages (tested: 4 pages max per IP)
+    rotate_min_pages = 2
+    rotate_max_pages = 3
     rotate_delay_min_s = config.SESSION_ROTATE_DELAY_MIN_S
     rotate_delay_max_s = config.SESSION_ROTATE_DELAY_MAX_S
 
@@ -54,6 +61,59 @@ class Inmuebles24Scraper(BaseScraper):
             from scrapers.base.modes import INCREMENTAL_MAX_PAGES
             self.max_pages = min(max_pages, INCREMENTAL_MAX_PAGES)
 
+    async def _init_browser_for_state(self):
+        """Create fresh Chromium browser for I24 (overrides base Camoufox method)."""
+        self._current_browser, self._current_context = await create_stealth_browser(
+            config=BrowserConfig(headless=True),
+            proxy_manager=self.proxy_manager,
+            portal_slug=self.portal_slug,
+            engine="chromium",
+        )
+        self._pages_since_rotation = 0
+        self._rotate_after = self._next_rotation_threshold()
+        self._consecutive_blocks = 0
+
+    async def _create_fresh_context(self):
+        """Create a fresh context on the current browser (new cookies, same process)."""
+        worker_id = f"w-{random.randint(100000, 999999)}"
+        identity = create_identity(worker_id)
+
+        proxy_session = None
+        if self.proxy_manager and self.proxy_manager.has_proxies:
+            proxy_session = self.proxy_manager.create_session(worker_id)
+
+        context = await create_chromium_context(
+            self._current_browser, identity, proxy_session,
+            portal_slug=self.portal_slug,
+        )
+        return context
+
+    async def _rotate_session(self, reason: str = "scheduled"):
+        """Close current browser and create a fresh Chromium with new proxy IP."""
+        self.logger.info(
+            "scraper.session_rotate",
+            reason=reason,
+            pages_since_last=self._pages_since_rotation,
+        )
+        await self._close_browser()
+        await self._init_browser_for_state()
+
+        delay = random.uniform(self.rotate_delay_min_s, self.rotate_delay_max_s)
+        self.logger.info("scraper.rotation_cooldown", delay_s=round(delay, 1))
+        await asyncio.sleep(delay)
+
+    async def _close_browser(self, context=None, browser=None):
+        """Close browser handling Chromium's playwright instance."""
+        ctx = context or self._current_context
+        brw = browser or self._current_browser
+        try:
+            if ctx:
+                await ctx.close()
+        except Exception:
+            pass
+        if brw:
+            await close_browser(brw)
+
     async def scrape(self) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []
 
@@ -61,8 +121,6 @@ class Inmuebles24Scraper(BaseScraper):
             await self._init_browser_for_state()
             try:
                 for operation in self.operations:
-                    # Reset block counter per operation — a blocked IP for venta
-                    # doesn't mean all operations are blocked
                     self._consecutive_blocks = 0
                     for prop_type in self.property_types:
                         search_items = await self._scrape_search(
@@ -92,17 +150,17 @@ class Inmuebles24Scraper(BaseScraper):
     ) -> list[ScrapedItem]:
         """Scrape all pages of a search query (state + operation + type).
 
-        Rotates proxy session every N pages to avoid detection.
+        Uses fresh context per page to bypass Cloudflare cookie tracking.
+        Rotates browser (new proxy IP) every 2-3 pages.
         """
         items: list[ScrapedItem] = []
         op_slug = config.OPERATIONS.get(operation, operation)
         type_slug = config.PROPERTY_TYPES.get(property_type, property_type)
 
         for page_num in range(1, self.max_pages + 1):
-            # Check if we need to rotate proxy session
+            # Check if we need to rotate browser (new proxy IP)
             await self._maybe_rotate()
 
-            # Use sort-by-recent URL in incremental mode
             template = config.SEARCH_URL_RECENT_TEMPLATE if self.mode == "incremental" else config.SEARCH_URL_TEMPLATE
             url = template.format(
                 property_type=type_slug,
@@ -111,15 +169,16 @@ class Inmuebles24Scraper(BaseScraper):
                 page=page_num,
             )
 
-            page = await self._current_context.new_page()
+            # Fresh context per page — clears CF cookies
+            context = await self._create_fresh_context()
+            page = await context.new_page()
             try:
                 page_items, was_blocked = await self._scrape_search_page(
                     page, url, operation, property_type, state=state
                 )
 
-                # Handle block/403 — rotate IP and retry up to 3 times
                 if was_blocked:
-                    await page.close()
+                    await context.close()
                     max_retries = 3
                     for retry in range(max_retries):
                         self._consecutive_blocks += 1
@@ -140,9 +199,10 @@ class Inmuebles24Scraper(BaseScraper):
                             )
                             break
 
-                        # Rotate to new IP and retry
+                        # Rotate to new IP (new browser) and retry
                         await self._rotate_session(reason="403_blocked")
-                        page = await self._current_context.new_page()
+                        context = await self._create_fresh_context()
+                        page = await context.new_page()
                         page_items, was_blocked = await self._scrape_search_page(
                             page, url, operation, property_type, state=state
                         )
@@ -150,9 +210,8 @@ class Inmuebles24Scraper(BaseScraper):
                         if not was_blocked:
                             self._consecutive_blocks = 0
                             break
-                        await page.close()
+                        await context.close()
                     else:
-                        # All retries exhausted
                         continue
 
                     if was_blocked and self._consecutive_blocks >= 6:
@@ -177,7 +236,6 @@ class Inmuebles24Scraper(BaseScraper):
                         )
                         break
 
-                # Persist immediately if callback is set
                 if self.on_page_scraped:
                     await self.on_page_scraped(page_items)
 
@@ -185,7 +243,7 @@ class Inmuebles24Scraper(BaseScraper):
                 self.total_items_scraped += len(page_items)
                 self._pages_since_rotation += 1
 
-                # Spot check: verify extraction against screenshot every N items
+                # Spot check every N items
                 if (self.total_items_scraped % self.spot_check_interval < len(page_items)
                         and page_items and settings.anthropic_api_key):
                     try:
@@ -236,7 +294,10 @@ class Inmuebles24Scraper(BaseScraper):
                     "scraper.page_error", page=page_num, url=url
                 )
             finally:
-                await page.close()
+                try:
+                    await context.close()
+                except Exception:
+                    pass
 
         return items
 
@@ -258,25 +319,22 @@ class Inmuebles24Scraper(BaseScraper):
             self.logger.warning("scraper.no_response", url=url)
             return [], False
 
-        # If Cloudflare challenge, wait for it to resolve
+        # Cloudflare: 403 = hard block, 503 = JS challenge
         if response.status == 403 or response.status == 503:
             # Give CF challenge time to execute JS and redirect
             try:
                 await page.wait_for_load_state("networkidle", timeout=10000)
-                # Re-check URL — CF may have redirected after challenge
                 final_url = page.url
                 if final_url != url:
                     self.logger.info("scraper.cf_redirect", from_url=url, to_url=final_url)
             except Exception:
                 pass
 
-            # Check final page content after potential CF challenge
-            content = await page.content()
             has_cards = await page.query_selector(config.SELECTORS["listing_card"])
             if has_cards:
-                # CF challenge passed — continue with normal parsing
                 self.logger.info("scraper.cf_challenge_passed", url=url)
             else:
+                content = await page.content()
                 self.logger.warning(
                     "scraper.blocked_detail",
                     url=url,
@@ -321,7 +379,7 @@ class Inmuebles24Scraper(BaseScraper):
         if not self.visit_detail:
             return [self._partial_to_item(p) for p in partials], False
 
-        # Visit detail pages for richer data (m², antiquity, amenities, etc.)
+        # Visit detail pages for richer data
         items: list[ScrapedItem] = []
         for partial in partials:
             detail_url = partial.get("detail_url")
