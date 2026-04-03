@@ -62,16 +62,23 @@ class Inmuebles24Scraper(BaseScraper):
             self.max_pages = min(max_pages, INCREMENTAL_MAX_PAGES)
 
     async def _init_browser_for_state(self):
-        """Create fresh Chromium browser for I24 (overrides base Camoufox method)."""
-        self._current_browser, self._current_context = await create_stealth_browser(
-            config=BrowserConfig(headless=True),
-            proxy_manager=self.proxy_manager,
-            portal_slug=self.portal_slug,
-            engine="chromium",
+        """Create fresh Chromium browser for I24 (overrides base Camoufox method).
+
+        Only creates the browser — contexts are created per-page via
+        _create_fresh_context() to bypass CF cookie tracking.
+        """
+        from playwright.async_api import async_playwright
+
+        self._playwright = await async_playwright().start()
+        self._current_browser = await self._playwright.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
         )
+        self._current_context = None  # contexts created per-page
         self._pages_since_rotation = 0
         self._rotate_after = self._next_rotation_threshold()
         self._consecutive_blocks = 0
+        self.logger.info("scraper.chromium_browser_ready")
 
     async def _create_fresh_context(self):
         """Create a fresh context on the current browser (new cookies, same process)."""
@@ -89,7 +96,24 @@ class Inmuebles24Scraper(BaseScraper):
         return context
 
     async def _rotate_session(self, reason: str = "scheduled"):
-        """Close current browser and create a fresh Chromium with new proxy IP."""
+        """Close current browser and create a fresh Chromium with new proxy IP.
+
+        Without proxy, rotation is pointless (same IP). Skip rotation and
+        just add extra backoff delay.
+        """
+        has_proxy = self.proxy_manager and self.proxy_manager.has_proxies
+
+        if not has_proxy:
+            # No proxy = same IP. Just wait longer instead of rotating.
+            delay = random.uniform(10, 20)
+            self.logger.warning(
+                "scraper.no_proxy_backoff",
+                reason=reason,
+                delay_s=round(delay, 1),
+            )
+            await asyncio.sleep(delay)
+            return
+
         self.logger.info(
             "scraper.session_rotate",
             reason=reason,
@@ -111,8 +135,18 @@ class Inmuebles24Scraper(BaseScraper):
                 await ctx.close()
         except Exception:
             pass
-        if brw:
-            await close_browser(brw)
+        try:
+            if brw:
+                await brw.close()
+        except Exception:
+            pass
+        try:
+            pw = getattr(self, "_playwright", None)
+            if pw:
+                await pw.stop()
+                self._playwright = None
+        except Exception:
+            pass
 
     async def scrape(self) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []

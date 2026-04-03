@@ -287,6 +287,10 @@ ANTIQUITY_MAP = {
     "entrega inmediata": "a_estrenar",
 }
 
+# Proxy policy: "direct" = use VPS IP (no proxy needed), "proxy_required" = must use proxy
+# Propiedades.com works from any country IP — no geo-blocking
+PROXY_POLICY = "direct"
+
 # Scraping behavior
 MAX_PAGES_PER_SEARCH = 50
 REQUEST_DELAY_MIN_MS = 2000

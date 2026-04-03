@@ -139,24 +139,40 @@ class BaseScraper(abc.ABC):
         self._rotate_after: int = self._next_rotation_threshold()
         self._consecutive_blocks: int = 0
 
+    @property
+    def _proxy_policy(self) -> str:
+        """Get proxy policy from portal config. Override or set PROXY_POLICY in config."""
+        return getattr(self, '_portal_proxy_policy', 'proxy_required')
+
+    @property
+    def _uses_proxy(self) -> bool:
+        """Whether this scraper uses proxy (affects budget tracking and rotation)."""
+        return self._proxy_policy != "direct"
+
     def _next_rotation_threshold(self) -> int:
         """Random number of pages before next proxy rotation."""
         return random.randint(self.rotate_min_pages, self.rotate_max_pages)
 
     async def _create_fresh_browser(self):
         """Create a new browser + context with a fresh proxy session."""
-        # Check budget before creating a new browser
+        # Check budget before creating a new browser (only if using proxy)
         tracker = BandwidthTracker.get_instance()
-        tracker.check_budget()
+        if self._uses_proxy:
+            tracker.check_budget()
+
+        # Direct policy: skip proxy entirely, use VPS IP
+        effective_proxy = self.proxy_manager if self._uses_proxy else None
 
         browser, context = await create_stealth_browser(
             config=BrowserConfig(headless=True),
-            proxy_manager=self.proxy_manager,
+            proxy_manager=effective_proxy,
             portal_slug=self.portal_slug,
+            via_proxy=self._uses_proxy,
         )
         self.logger.info(
             "scraper.fresh_browser",
-            has_proxy=self.proxy_manager.has_proxies if self.proxy_manager else False,
+            proxy_policy=self._proxy_policy,
+            has_proxy=effective_proxy.has_proxies if effective_proxy else False,
             bandwidth_mb=round(tracker.total_mb, 1),
             budget_remaining_mb=round(tracker.budget_remaining_mb, 1),
         )
@@ -196,9 +212,10 @@ class BaseScraper(abc.ABC):
 
     async def _maybe_rotate(self) -> None:
         """Rotate proxy session if page threshold reached. Also checks budget."""
-        # Budget check before continuing
+        # Budget check before continuing (only for proxy traffic)
         tracker = BandwidthTracker.get_instance()
-        tracker.check_budget()
+        if self._uses_proxy:
+            tracker.check_budget()
 
         # Log bandwidth stats every 10 pages
         if self._pages_since_rotation > 0 and self.total_items_scraped % 10 == 0:
@@ -209,7 +226,12 @@ class BaseScraper(abc.ABC):
                 budget_remaining_mb=stats["budget_remaining_mb"],
                 avg_kb_per_request=stats["avg_kb_per_request"],
                 blocked_requests=stats["blocked_requests"],
+                proxy_policy=self._proxy_policy,
             )
+
+        # Skip rotation for direct connections — no proxy IP to rotate
+        if not self._uses_proxy:
+            return
 
         if self._pages_since_rotation >= self._rotate_after:
             await self._rotate_session(reason="page_limit")

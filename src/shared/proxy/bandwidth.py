@@ -47,9 +47,11 @@ class BandwidthTracker:
     warning_threshold: float = 0.8  # warn at 80%
 
     # Internal state
-    _total_bytes: int = 0
+    _total_bytes: int = 0  # proxy bytes only (counts toward budget)
+    _total_bytes_all: int = 0  # all bytes including direct traffic
     _bytes_by_portal: dict[str, int] = field(default_factory=dict)
     _request_count: int = 0
+    _direct_request_count: int = 0  # requests via direct VPS IP
     _blocked_count: int = 0  # requests blocked by resource filter
     _start_time: float = field(default_factory=time.time)
     _warned: bool = False
@@ -90,17 +92,31 @@ class BandwidthTracker:
             return 0
         return self._total_bytes / self._request_count
 
-    def add_bytes(self, byte_count: int, portal: str = "unknown") -> None:
-        """Track bytes transferred. Call from response handler."""
+    @property
+    def total_mb_all(self) -> float:
+        """Total MB including direct (non-proxy) traffic."""
+        return self._total_bytes_all / (1024 * 1024)
+
+    def add_bytes(self, byte_count: int, portal: str = "unknown", via_proxy: bool = True) -> None:
+        """Track bytes transferred. Call from response handler.
+
+        Args:
+            via_proxy: If True, counts toward proxy budget. If False (direct VPS IP),
+                       tracked for stats but does NOT count against budget.
+        """
         with self._lock:
-            self._total_bytes += byte_count
-            self._request_count += 1
+            self._total_bytes_all += byte_count
             self._bytes_by_portal[portal] = (
                 self._bytes_by_portal.get(portal, 0) + byte_count
             )
+            if via_proxy:
+                self._total_bytes += byte_count
+                self._request_count += 1
+            else:
+                self._direct_request_count += 1
 
-        # Check thresholds
-        if not self._warned and self.budget_used_pct >= self.warning_threshold * 100:
+        # Check thresholds (only proxy traffic triggers warnings)
+        if via_proxy and not self._warned and self.budget_used_pct >= self.warning_threshold * 100:
             self._warned = True
             logger.warning(
                 "bandwidth.warning",
@@ -131,10 +147,12 @@ class BandwidthTracker:
         elapsed = time.time() - self._start_time
         return {
             "total_mb": round(self.total_mb, 2),
+            "total_mb_all": round(self.total_mb_all, 2),
             "budget_mb": self.budget_mb,
             "budget_remaining_mb": round(self.budget_remaining_mb, 2),
             "budget_used_pct": round(self.budget_used_pct, 1),
             "requests": self._request_count,
+            "direct_requests": self._direct_request_count,
             "blocked_requests": self._blocked_count,
             "avg_kb_per_request": round(self.avg_bytes_per_request / 1024, 1),
             "elapsed_minutes": round(elapsed / 60, 1),

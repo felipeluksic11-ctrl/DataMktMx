@@ -30,6 +30,7 @@ class LamudiScraper(BaseScraper):
         **kwargs,
     ):
         super().__init__(proxy_manager)
+        self._portal_proxy_policy = getattr(config, 'PROXY_POLICY', 'proxy_required')
         self.mode = mode
         self.known_cache = known_cache
         self.states = states or config.STATES

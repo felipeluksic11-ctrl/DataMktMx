@@ -278,6 +278,10 @@ ANTIQUITY_MAP = {
     "new": "a_estrenar",
 }
 
+# Proxy policy: "direct" = use VPS IP (no proxy needed), "proxy_required" = must use proxy
+# Lamudi works from any country IP — no geo-blocking
+PROXY_POLICY = "direct"
+
 # Scraping behavior
 MAX_PAGES_PER_SEARCH = 50
 LISTINGS_PER_PAGE = 30

@@ -72,6 +72,9 @@ EXTRAS_MAP = i24_config.EXTRAS_MAP
 CONSERVATION_MAP = i24_config.CONSERVATION_MAP
 ANTIQUITY_MAP = i24_config.ANTIQUITY_MAP
 
+# Proxy policy: "proxy_preferred" = use proxy if available, but may work direct
+PROXY_POLICY = "proxy_preferred"
+
 MAX_PAGES_PER_SEARCH = 50
 REQUEST_DELAY_MIN_MS = 2000
 REQUEST_DELAY_MAX_MS = 5000

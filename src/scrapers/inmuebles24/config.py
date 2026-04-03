@@ -280,6 +280,9 @@ ANTIQUITY_MAP = {
     "entrega inmediata": "a_estrenar",
 }
 
+# Proxy policy: "proxy_required" = must use residential proxy (Cloudflare geo-blocks)
+PROXY_POLICY = "proxy_required"
+
 # Scraping behavior
 MAX_PAGES_PER_SEARCH = 50
 REQUEST_DELAY_MIN_MS = 3000

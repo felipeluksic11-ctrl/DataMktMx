@@ -38,12 +38,19 @@ CHROMIUM_ANTI_DETECT_SCRIPT = """
 """
 
 
-async def _setup_context_interceptors(context, portal_slug: str = "unknown", allow_stylesheets: bool = False):
+async def _setup_context_interceptors(
+    context,
+    portal_slug: str = "unknown",
+    allow_stylesheets: bool = False,
+    via_proxy: bool = True,
+):
     """Set up resource blocking and bandwidth tracking on a context.
 
     Args:
         allow_stylesheets: If True, don't block CSS. Required for Cloudflare-
             protected portals where CSS is needed for the JS challenge to pass.
+        via_proxy: If True, bandwidth counts toward proxy budget. If False
+            (direct VPS IP), tracked for stats but doesn't count against budget.
     """
     tracker = BandwidthTracker.get_instance()
 
@@ -70,7 +77,7 @@ async def _setup_context_interceptors(context, portal_slug: str = "unknown", all
         try:
             body = await response.body()
             byte_count = len(body)
-            tracker.add_bytes(byte_count, portal=portal_slug)
+            tracker.add_bytes(byte_count, portal=portal_slug, via_proxy=via_proxy)
         except Exception:
             pass
 
@@ -81,6 +88,7 @@ async def create_worker_browser(
     identity: WorkerIdentity,
     proxy_session: ProxySession | None = None,
     portal_slug: str = "unknown",
+    via_proxy: bool = True,
 ):
     """Create a stealth browser + context using Camoufox (Firefox).
 
@@ -127,7 +135,9 @@ async def create_worker_browser(
     context.set_default_timeout(identity.page_timeout_ms)
     context.set_default_navigation_timeout(identity.navigation_timeout_ms)
 
-    await _setup_context_interceptors(context, portal_slug, allow_stylesheets=False)
+    await _setup_context_interceptors(
+        context, portal_slug, allow_stylesheets=False, via_proxy=via_proxy,
+    )
 
     logger.info(
         "browser.created",
@@ -146,6 +156,7 @@ async def create_chromium_browser(
     identity: WorkerIdentity,
     proxy_session: ProxySession | None = None,
     portal_slug: str = "unknown",
+    via_proxy: bool = True,
 ):
     """Create a stealth browser + context using Playwright Chromium.
 
@@ -204,7 +215,9 @@ async def create_chromium_browser(
     await context.add_init_script(CHROMIUM_ANTI_DETECT_SCRIPT)
 
     # CF-protected portals need stylesheets for the JS challenge
-    await _setup_context_interceptors(context, portal_slug, allow_stylesheets=True)
+    await _setup_context_interceptors(
+        context, portal_slug, allow_stylesheets=True, via_proxy=via_proxy,
+    )
 
     # Store playwright instance on browser for cleanup
     browser._playwright = pw
@@ -227,6 +240,7 @@ async def create_chromium_context(
     identity: WorkerIdentity,
     proxy_session: ProxySession | None = None,
     portal_slug: str = "unknown",
+    via_proxy: bool = True,
 ):
     """Create a fresh context on an existing Chromium browser.
 
@@ -256,12 +270,17 @@ async def create_chromium_context(
     context.set_default_timeout(identity.page_timeout_ms)
     context.set_default_navigation_timeout(identity.navigation_timeout_ms)
     await context.add_init_script(CHROMIUM_ANTI_DETECT_SCRIPT)
-    await _setup_context_interceptors(context, portal_slug, allow_stylesheets=True)
+    await _setup_context_interceptors(
+        context, portal_slug, allow_stylesheets=True, via_proxy=via_proxy,
+    )
 
     return context
 
 
-async def create_stealth_browser(config=None, proxy_manager=None, portal_slug="unknown", engine="camoufox"):
+async def create_stealth_browser(
+    config=None, proxy_manager=None, portal_slug="unknown",
+    engine="camoufox", via_proxy=True,
+):
     """Create a browser with a random unique identity.
 
     Each call gets a unique worker_id seed, producing different
@@ -269,6 +288,7 @@ async def create_stealth_browser(config=None, proxy_manager=None, portal_slug="u
 
     Args:
         engine: "camoufox" (default) or "chromium" (for CF-protected portals)
+        via_proxy: If False, bandwidth is tracked but doesn't count against proxy budget.
     """
     import random as _rng
     # Unique seed per browser instance — different fingerprint each time
@@ -285,9 +305,15 @@ async def create_stealth_browser(config=None, proxy_manager=None, portal_slug="u
         proxy_session = proxy_manager.create_session("default")
 
     if engine == "chromium":
-        return await create_chromium_browser(identity, proxy_session, portal_slug=portal_slug)
+        return await create_chromium_browser(
+            identity, proxy_session,
+            portal_slug=portal_slug, via_proxy=via_proxy,
+        )
 
-    return await create_worker_browser(identity, proxy_session, portal_slug=portal_slug)
+    return await create_worker_browser(
+        identity, proxy_session,
+        portal_slug=portal_slug, via_proxy=via_proxy,
+    )
 
 
 async def close_browser(browser):
