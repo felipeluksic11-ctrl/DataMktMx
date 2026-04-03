@@ -72,7 +72,7 @@ class Inmuebles24Scraper(BaseScraper):
         self._playwright = await async_playwright().start()
         self._current_browser = await self._playwright.chromium.launch(
             headless=True,
-            args=["--disable-blink-features=AutomationControlled"],
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
         )
         self._current_context = None  # contexts created per-page
         self._pages_since_rotation = 0
@@ -213,7 +213,7 @@ class Inmuebles24Scraper(BaseScraper):
 
                 if was_blocked:
                     await context.close()
-                    max_retries = 3
+                    max_retries = 5
                     for retry in range(max_retries):
                         self._consecutive_blocks += 1
                         self.logger.warning(
@@ -224,7 +224,7 @@ class Inmuebles24Scraper(BaseScraper):
                             consecutive_blocks=self._consecutive_blocks,
                         )
 
-                        if self._consecutive_blocks >= 6:
+                        if self._consecutive_blocks >= 10:
                             self.logger.warning(
                                 "scraper.operation_blocked",
                                 state=state,
@@ -233,8 +233,10 @@ class Inmuebles24Scraper(BaseScraper):
                             )
                             break
 
-                        # Rotate to new IP (new browser) and retry
-                        await self._rotate_session(reason="403_blocked")
+                        # Light retry: just new context + new proxy session
+                        # (cheaper than full browser rotation)
+                        delay = random.uniform(3, 7)
+                        await asyncio.sleep(delay)
                         context = await self._create_fresh_context()
                         page = await context.new_page()
                         page_items, was_blocked = await self._scrape_search_page(
@@ -248,7 +250,7 @@ class Inmuebles24Scraper(BaseScraper):
                     else:
                         continue
 
-                    if was_blocked and self._consecutive_blocks >= 6:
+                    if was_blocked and self._consecutive_blocks >= 10:
                         break
                 else:
                     self._consecutive_blocks = 0
