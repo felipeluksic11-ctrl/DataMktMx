@@ -1,8 +1,10 @@
 """Supabase Exporter — syncs raw listings to archive.mined_listings.
 
-Permanent backup of all mined data. Uses PostgREST upsert via httpx.
+Permanent backup of all mined data. Uses RPC function for upsert.
 Never loses data: ON CONFLICT updates, soft-delete only on Supabase side.
 """
+
+import json
 
 import httpx
 from sqlalchemy import text
@@ -13,7 +15,7 @@ from shared.logging import get_logger
 
 logger = get_logger("etl.exporter.supabase")
 
-BATCH_SIZE = 500
+BATCH_SIZE = 200
 
 # Query raw_listings joined with portal slug.
 # Excludes url_listing, raw_json, and scraping metadata per CLAUDE.md rules.
@@ -65,26 +67,26 @@ def _build_headers() -> dict[str, str]:
         "apikey": settings.supabase_service_key,
         "Authorization": f"Bearer {settings.supabase_service_key}",
         "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=minimal",
-        "Accept-Profile": "archive",
-        "Content-Profile": "archive",
     }
 
 
 def _row_to_dict(row) -> dict:
     """Convert a DB row to a dict matching archive.mined_listings columns."""
     d = dict(row._mapping)
-    # Convert datetimes to ISO strings for JSON
     for ts_field in ("first_seen_at", "last_seen_at"):
         if d.get(ts_field):
             d[ts_field] = d[ts_field].isoformat()
+    # Convert JSONB fields that are already Python objects
+    for jf in ("extra_rooms", "services", "amenities", "exteriors", "extras"):
+        if d.get(jf) is not None and not isinstance(d[jf], str):
+            d[jf] = d[jf]  # already a list/dict, json.dumps handled by httpx
     return d
 
 
 async def sync_to_supabase(session: AsyncSession) -> dict:
-    """Sync all raw_listings to Supabase archive. Returns stats.
+    """Sync all raw_listings to Supabase archive via RPC function.
 
-    Uses PostgREST upsert (ON CONFLICT on portal_slug + external_id).
+    Uses public.upsert_mined_listings() which handles ON CONFLICT.
     Existing rows get updated with latest data; nothing is ever deleted.
     """
     if not settings.supabase_url or not settings.supabase_service_key:
@@ -98,20 +100,20 @@ async def sync_to_supabase(session: AsyncSession) -> dict:
         logger.info("supabase.no_data")
         return {"synced": 0}
 
-    url = f"{settings.supabase_url}/rest/v1/mined_listings?on_conflict=portal_slug,external_id"
+    url = f"{settings.supabase_url}/rest/v1/rpc/upsert_mined_listings"
     headers = _build_headers()
 
     total_synced = 0
     total_errors = 0
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=120.0) as client:
         for i in range(0, len(rows), BATCH_SIZE):
             batch = rows[i : i + BATCH_SIZE]
-            payload = [_row_to_dict(r) for r in batch]
+            payload = {"listings": [_row_to_dict(r) for r in batch]}
 
             try:
                 resp = await client.post(url, json=payload, headers=headers)
-                if resp.status_code in (200, 201):
+                if resp.status_code == 200:
                     total_synced += len(batch)
                     logger.info(
                         "supabase.batch_synced",
