@@ -15,7 +15,22 @@ OPERATIONS = {
     "renta": "renta",
 }
 
-# Mexican states for crawl (slug format for URLs)
+# Portal status — set to False to disable without removing code
+IS_ENABLED = True
+
+# Phase 1: 8 priority states (high-volume markets)
+PHASE1_STATES = [
+    "ciudad-de-mexico",
+    "estado-de-mexico",
+    "jalisco",
+    "queretaro",
+    "quintana-roo",
+    "yucatan",
+    "nayarit",
+    "baja-california-sur",
+]
+
+# All 32 Mexican states for crawl (slug format for URLs)
 STATES = [
     "ciudad-de-mexico",
     "estado-de-mexico",

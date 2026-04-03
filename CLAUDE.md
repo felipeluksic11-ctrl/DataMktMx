@@ -188,28 +188,66 @@ Proxy traffic costs real money ($1/GB). Every scraper run MUST be bandwidth-cons
 3. Incluir `--budget` flag
 4. Monitorear `bandwidth.summary` en logs
 
+### Autonomous per-portal orchestration
+
+Cada portal corre como un cron job independiente en su propio Docker container.
+Esto asegura aislamiento de fallos y budget independiente por proceso.
+
+**Config por portal (en `src/scrapers/<portal>/config.py`):**
+
+| Constante | Proposito | Ejemplo |
+|-----------|-----------|---------|
+| `PHASE1_STATES` | 8 estados prioritarios | `["ciudad-de-mexico", ...]` |
+| `IS_ENABLED` | Kill switch a nivel codigo | `True` / `False` |
+| `PROXY_POLICY` | Comportamiento de proxy | `"direct"` / `"proxy_required"` / `"proxy_preferred"` |
+
+**Estado de portales:**
+
+| Portal | IS_ENABLED | PROXY_POLICY | Razon si deshabilitado |
+|--------|-----------|--------------|----------------------|
+| Lamudi | True | direct | — |
+| Propiedades | True | direct | — |
+| Inmuebles24 | False | proxy_required | Cloudflare bloquea 100% con DataImpulse MX |
+| Vivanuncios | False | proxy_preferred | No probado |
+
+**PHASE1_STATES es el default.** Cuando no se pasa `--states`, el runner usa PHASE1_STATES del portal automaticamente. Pasar `--states` explicitamente para override.
+
+**Para habilitar un portal deshabilitado:**
+1. `IS_ENABLED = True` en su config.py
+2. Descomentar su cron entry en `infrastructure/cron/propyte.cron`
+3. Verificar `is_active = true` en la tabla portals de la DB
+4. Asignar budget del reserve
+
 ### Cron jobs (infrastructure/cron/propyte.cron)
 
-- Diario incremental: 8am UTC, `--budget 200 --no-detail`
-- Mensual full: 1ro del mes 6am UTC, `--budget 2000 --no-detail`
-- Semanal enrichment: miercoles 9am UTC, `--enrich --budget 500`
+- Cada portal corre independientemente, escalonado 30 min
+- Lamudi incremental: 8:00 UTC, `--budget 200 --no-detail`
+- Propiedades incremental: 8:30 UTC, `--budget 200 --no-detail`
+- Lamudi full mensual: 1ro del mes 6:00 UTC, `--budget 1500`
+- Propiedades full mensual: 1ro del mes 6:30 UTC, `--budget 3000`
+- Enrichment: Propiedades miercoles 9 UTC, Lamudi jueves 9 UTC
+- I24 y Vivanuncios: comentados hasta resolver bloqueos
 - **TODOS los cron entries DEBEN incluir `--budget`**
+- Logs separados por portal: `/var/log/datamktmx/scraper-<portal>.log`
 
-### Estimaciones de consumo (medido, sin x2)
+### Estimaciones de consumo (medido en VPS, con resource blocking)
 
-Dato clave medido: **~4.34 MB por pagina de busqueda** (con resource blocking).
-Esto incluye HTML + JS. No baja a menos sin romper funcionalidad.
+| Portal | KB/request | MB/pagina | Proxy policy | Costo proxy |
+|--------|-----------|-----------|--------------|-------------|
+| Lamudi | 241 | ~3.3 | direct | 0 (VPS IP) |
+| Propiedades | 66 | ~4.3 | direct | 0 (VPS IP) |
+| I24 | 56 | ~8-10 | proxy_required | ~$0.20/GB |
 
-| Operacion | GB plan | Listings estimados |
+| Operacion | GB proxy | Listings estimados |
 |-----------|---------|-------------------|
-| 1 pagina cards-only | 0.004 GB | 30-47 |
-| Incremental diario (20 paginas × 4 portales) | ~0.35 GB | ~500 nuevos |
-| Full cards-only Propiedades (850 paginas) | ~3.6 GB | ~40K |
-| Full cards-only otros portales (1,332 paginas) | ~5.7 GB | ~40K |
-| Enrichment 10K details | ~2 GB | 10K enriquecidos |
-| **Total mensual estimado** | **~20 GB** | — |
+| Lamudi incremental diario | 0 GB | ~200 nuevos |
+| Propiedades incremental diario | 0 GB | ~100 nuevos |
+| Lamudi full 8 estados | 0 GB | ~21K |
+| Propiedades full 8 estados | 0 GB | ~2.5K unicos |
+| Enrichment semanal | ~0.5 GB | ~2K enriquecidos |
+| **Total mensual proxy** | **~2 GB** | — |
 | **Plan disponible** | **50 GB** | — |
-| **Margen** | **~30 GB** | — |
+| **Margen para I24/Vivanuncios** | **~48 GB** | — |
 
 ## Data Flow
 

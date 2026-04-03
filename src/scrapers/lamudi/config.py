@@ -22,7 +22,23 @@ OPERATIONS = {
     "renta": "rent",
 }
 
-# Mexican states — Lamudi uses lowercase-hyphenated slugs in URL path
+# Portal status — set to False to disable without removing code
+IS_ENABLED = True
+
+# Phase 1: 8 priority states (high-volume markets)
+# Used as default when --states is not passed
+PHASE1_STATES = [
+    "distrito-federal",      # CDMX
+    "mexico",                # Estado de México
+    "jalisco",
+    "queretaro-arteaga",     # Querétaro
+    "quintana-roo",
+    "yucatan",
+    "nayarit",
+    "baja-california-sur",
+]
+
+# All 32 Mexican states — Lamudi uses lowercase-hyphenated slugs in URL path
 STATES = [
     "distrito-federal",  # CDMX
     "mexico",  # Estado de México

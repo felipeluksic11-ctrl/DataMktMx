@@ -36,7 +36,22 @@ OPERATIONS = {
     "vacacional": "renta-vacacional",
 }
 
-# Mexican states for crawl (slug format for URLs)
+# Portal status — Cloudflare blocks 100% with DataImpulse MX proxy
+IS_ENABLED = False
+
+# Phase 1: 8 priority states (high-volume markets)
+PHASE1_STATES = [
+    "ciudad-de-mexico",
+    "estado-de-mexico",
+    "jalisco",
+    "queretaro",
+    "quintana-roo",
+    "yucatan",
+    "nayarit",
+    "baja-california-sur",
+]
+
+# All 32 Mexican states for crawl (slug format for URLs)
 STATES = [
     "ciudad-de-mexico",
     "estado-de-mexico",

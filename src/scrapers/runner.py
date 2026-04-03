@@ -14,6 +14,7 @@ from scrapers.propiedades import PropiedadesScraper
 from scrapers.propiedades.http_scraper import PropiedadesHttpScraper
 from scrapers.vivanuncios import VivanunciosScraper
 from scrapers.storage import upsert_raw_listings
+from etl.exporters.supabase import sync_to_supabase
 from shared.db.models import RawListing
 from scrapers.quality_check import check_quality
 from shared.config import settings
@@ -42,6 +43,14 @@ HTTP_SCRAPER_REGISTRY: dict[str, type[HttpScraper]] = {
 }
 
 
+def _get_portal_config(portal_slug: str):
+    """Import and return a portal's config module."""
+    try:
+        return __import__(f"scrapers.{portal_slug}.config", fromlist=["config"])
+    except ImportError:
+        return None
+
+
 async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     """Run a single scraper by portal slug.
 
@@ -51,6 +60,20 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
         **kwargs: passed to the scraper constructor (states, operations, etc.)
     """
     setup_logging()
+
+    # Check IS_ENABLED in portal config (code-level kill switch)
+    portal_config = _get_portal_config(portal_slug)
+    if portal_config and not getattr(portal_config, "IS_ENABLED", True):
+        logger.warning("runner.portal_disabled", slug=portal_slug)
+        return
+
+    # Default to PHASE1_STATES if --states was not passed
+    if "states" not in kwargs or kwargs.get("states") is None:
+        if portal_config:
+            phase1 = getattr(portal_config, "PHASE1_STATES", None)
+            if phase1:
+                kwargs["states"] = phase1
+                logger.info("runner.using_phase1_states", portal=portal_slug, count=len(phase1))
 
     # Get bandwidth tracker (already initialized in main() with correct budget)
     tracker = BandwidthTracker.get_instance()
@@ -103,11 +126,13 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
         try:
             # Accumulated stats across all pages
             total_stats = {"new": 0, "updated": 0, "errors": 0, "pages": 0}
+            _last_sync_at = 0  # tracks new listings count at last Supabase sync
 
             async def persist_page(page_items):
                 """Callback: persist items to DB after each page.
                 Uses a fresh session to avoid greenlet conflicts with Playwright.
                 """
+                nonlocal _last_sync_at
                 async with session_factory() as persist_session:
                     page_stats = await upsert_raw_listings(
                         session=persist_session,
@@ -123,6 +148,16 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
                     # Quality check every 10 pages
                     if total_stats["pages"] % 10 == 0:
                         await check_quality(persist_session, portal.id, portal_slug, job.id)
+
+                    # Sync to Supabase every 500 new listings
+                    new_since_sync = total_stats["new"] - _last_sync_at
+                    if new_since_sync >= 500:
+                        try:
+                            await sync_to_supabase(persist_session)
+                            _last_sync_at = total_stats["new"]
+                            logger.info("runner.supabase_sync", new_since_sync=new_since_sync)
+                        except Exception:
+                            logger.warning("runner.supabase_sync_failed", exc_info=True)
 
                 return page_stats
 

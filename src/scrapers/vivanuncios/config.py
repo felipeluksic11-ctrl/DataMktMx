@@ -58,6 +58,21 @@ OPERATIONS = {
 # Category codes
 CATEGORY_CODE = "c1097"  # inmuebles (all)
 
+# Portal status — untested, enable after verifying proxy behavior
+IS_ENABLED = False
+
+# Phase 1: 8 priority states (high-volume markets)
+PHASE1_STATES = [
+    "ciudad-de-mexico",
+    "estado-de-mexico",
+    "jalisco",
+    "queretaro",
+    "quintana-roo",
+    "yucatan",
+    "nayarit",
+    "baja-california-sur",
+]
+
 STATES = list(STATE_CODES.keys())
 
 # Reuse I24 selectors — identical frontend
