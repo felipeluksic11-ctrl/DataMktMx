@@ -30,11 +30,12 @@ class Inmuebles24Scraper(BaseScraper):
     portal_slug = "inmuebles24"
     portal_name = "Inmuebles24"
 
-    # I24 CF is aggressive — rotate every 2-3 pages (tested: 4 pages max per IP)
-    rotate_min_pages = 2
-    rotate_max_pages = 3
-    rotate_delay_min_s = config.SESSION_ROTATE_DELAY_MIN_S
-    rotate_delay_max_s = config.SESSION_ROTATE_DELAY_MAX_S
+    # I24 CF allows exactly 1 page per proxy IP, then blocks.
+    # Rotate context (new IP) every page. Delays 8-15s to look human.
+    rotate_min_pages = 1
+    rotate_max_pages = 1
+    rotate_delay_min_s = 8.0
+    rotate_delay_max_s = 15.0
 
     def __init__(
         self,
@@ -213,7 +214,9 @@ class Inmuebles24Scraper(BaseScraper):
 
                 if was_blocked:
                     await context.close()
-                    max_retries = 5
+                    # ~50% of DataImpulse MX IPs are CF-flagged.
+                    # Retry with new IP + longer delay between attempts.
+                    max_retries = 3
                     for retry in range(max_retries):
                         self._consecutive_blocks += 1
                         self.logger.warning(
@@ -224,7 +227,7 @@ class Inmuebles24Scraper(BaseScraper):
                             consecutive_blocks=self._consecutive_blocks,
                         )
 
-                        if self._consecutive_blocks >= 10:
+                        if self._consecutive_blocks >= 15:
                             self.logger.warning(
                                 "scraper.operation_blocked",
                                 state=state,
@@ -233,9 +236,8 @@ class Inmuebles24Scraper(BaseScraper):
                             )
                             break
 
-                        # Light retry: just new context + new proxy session
-                        # (cheaper than full browser rotation)
-                        delay = random.uniform(3, 7)
+                        # New context + new proxy session (new IP)
+                        delay = random.uniform(10, 20)
                         await asyncio.sleep(delay)
                         context = await self._create_fresh_context()
                         page = await context.new_page()
@@ -250,7 +252,7 @@ class Inmuebles24Scraper(BaseScraper):
                     else:
                         continue
 
-                    if was_blocked and self._consecutive_blocks >= 10:
+                    if was_blocked and self._consecutive_blocks >= 15:
                         break
                 else:
                     self._consecutive_blocks = 0
