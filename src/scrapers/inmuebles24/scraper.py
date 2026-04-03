@@ -355,9 +355,14 @@ class Inmuebles24Scraper(BaseScraper):
             self.logger.warning("scraper.no_response", url=url)
             return [], False
 
-        # Cloudflare: 403 = hard block, 503 = JS challenge
-        if response.status == 403 or response.status == 503:
-            # Give CF challenge time to execute JS and redirect
+        # Cloudflare: 403 = hard block (return immediately), 503 = JS challenge (wait)
+        if response.status == 403:
+            # Hard block — do NOT wait for networkidle, CF's challenge script
+            # will fingerprint this IP and make subsequent requests worse.
+            return [], True
+
+        if response.status == 503:
+            # JS challenge — wait for it to resolve, may redirect to real page
             try:
                 await page.wait_for_load_state("networkidle", timeout=10000)
                 final_url = page.url
@@ -370,14 +375,6 @@ class Inmuebles24Scraper(BaseScraper):
             if has_cards:
                 self.logger.info("scraper.cf_challenge_passed", url=url)
             else:
-                content = await page.content()
-                self.logger.warning(
-                    "scraper.blocked_detail",
-                    url=url,
-                    status=response.status,
-                    has_cf="challenge" in content.lower() or "cf-" in content.lower(),
-                    content_len=len(content),
-                )
                 return [], True
 
         if response.status >= 400:
