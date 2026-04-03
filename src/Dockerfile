@@ -42,7 +42,8 @@ RUN pip install --upgrade pip && pip install \
     "thefuzz[speedup]>=0.22.0" \
     "pandas>=2.2.0" \
     "anthropic>=0.30.0" \
-    "dramatiq[redis]>=1.17.0"
+    "dramatiq[redis]>=1.17.0" \
+    "selectolax>=0.3.0"
 
 # Install Playwright browsers
 RUN playwright install chromium --with-deps
