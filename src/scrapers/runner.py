@@ -6,9 +6,12 @@ import datetime
 from sqlalchemy import select, or_, and_
 
 from scrapers.base import BaseScraper
+from scrapers.base.http_scraper import HttpScraper
 from scrapers.inmuebles24 import Inmuebles24Scraper
 from scrapers.lamudi import LamudiScraper
+from scrapers.lamudi.http_scraper import LamudiHttpScraper
 from scrapers.propiedades import PropiedadesScraper
+from scrapers.propiedades.http_scraper import PropiedadesHttpScraper
 from scrapers.vivanuncios import VivanunciosScraper
 from scrapers.storage import upsert_raw_listings
 from shared.db.models import RawListing
@@ -22,12 +25,20 @@ from shared.proxy.manager import ProxyManager
 
 logger = get_logger("scraper.runner")
 
-# Registry of available scrapers
+# Registry of available scrapers (browser-based, full Playwright)
 SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
     "inmuebles24": Inmuebles24Scraper,
     "lamudi": LamudiScraper,
     "propiedades": PropiedadesScraper,
     "vivanuncios": VivanunciosScraper,
+}
+
+# HTTP scrapers — lightweight httpx-based, ~20-40x less bandwidth
+# Used for cards-only scraping (--no-detail). Falls back to browser
+# for detail enrichment.
+HTTP_SCRAPER_REGISTRY: dict[str, type[HttpScraper]] = {
+    "lamudi": LamudiHttpScraper,
+    "propiedades": PropiedadesHttpScraper,
 }
 
 
@@ -115,15 +126,33 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
 
                 return page_stats
 
-            # Run scraper with per-page persistence
-            scraper = scraper_cls(
-                proxy_manager=proxy_manager,
-                mode=mode,
-                known_cache=known_cache,
-                **kwargs,
-            )
-            scraper.on_page_scraped = persist_page
-            items = await scraper.run(job)
+            # Choose HTTP scraper for cards-only mode if available
+            visit_detail = kwargs.get("visit_detail", True)
+            http_cls = HTTP_SCRAPER_REGISTRY.get(portal_slug)
+            use_http = http_cls and not visit_detail
+
+            if use_http:
+                logger.info(
+                    "runner.using_http_scraper",
+                    portal=portal_slug,
+                    scraper=http_cls.__name__,
+                )
+                scraper = http_cls(
+                    mode=mode,
+                    known_cache=known_cache,
+                    **{k: v for k, v in kwargs.items() if k != "visit_detail"},
+                )
+                scraper.on_page_scraped = persist_page
+                items = await scraper.run(job)
+            else:
+                scraper = scraper_cls(
+                    proxy_manager=proxy_manager,
+                    mode=mode,
+                    known_cache=known_cache,
+                    **kwargs,
+                )
+                scraper.on_page_scraped = persist_page
+                items = await scraper.run(job)
 
             # Final job update
             job.total_scraped = total_stats["new"] + total_stats["updated"]
