@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Anthropic
     anthropic_api_key: str = ""
 
+    # Supabase (archivo permanente)
+    supabase_url: str = ""          # https://xxx.supabase.co
+    supabase_service_key: str = ""  # service_role key (bypasses RLS)
+
     # Alerts
     alert_webhook_url: str = ""  # Slack/Discord/Telegram webhook
 

@@ -20,6 +20,7 @@ from sqlalchemy import select
 
 from etl.pipeline import run_pipeline
 from etl.exporters.s3 import export_to_s3, export_to_file
+from etl.exporters.supabase import sync_to_supabase
 from orchestrator.planner import create_work_plan, approve_plan
 from orchestrator.scouts import SCOUT_REGISTRY
 from orchestrator.orchestrator import execute_plan
@@ -53,6 +54,7 @@ async def run_full_cycle(
         "plans": [],
         "etl": None,
         "export": None,
+        "supabase_sync": None,
         "errors": [],
     }
 
@@ -135,6 +137,15 @@ async def run_full_cycle(
                 except Exception as e2:
                     summary["errors"].append(f"Export error: {str(e2)[:200]}")
                     logger.exception("scheduler.export_error")
+
+        # Phase 7: Sync to Supabase (permanent backup)
+        logger.info("scheduler.phase_supabase_sync")
+        try:
+            sync_stats = await sync_to_supabase(session)
+            summary["supabase_sync"] = sync_stats
+        except Exception as e:
+            summary["errors"].append(f"Supabase sync error: {str(e)[:200]}")
+            logger.exception("scheduler.supabase_sync_error")
 
     engine = get_engine()
     await engine.dispose()
