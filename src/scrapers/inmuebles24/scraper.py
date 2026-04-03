@@ -30,10 +30,11 @@ class Inmuebles24Scraper(BaseScraper):
     portal_slug = "inmuebles24"
     portal_name = "Inmuebles24"
 
-    # I24 CF allows exactly 1 page per proxy IP, then blocks.
-    # Rotate context (new IP) every page. Delays 8-15s to look human.
-    rotate_min_pages = 1
-    rotate_max_pages = 1
+    # I24 creates a fresh context (new IP) per page in _scrape_search,
+    # so BaseScraper's _maybe_rotate is not needed. Set high threshold
+    # to effectively disable it — rotation happens organically per page.
+    rotate_min_pages = 999
+    rotate_max_pages = 999
     rotate_delay_min_s = 8.0
     rotate_delay_max_s = 15.0
 
