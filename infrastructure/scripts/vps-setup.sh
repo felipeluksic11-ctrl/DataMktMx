@@ -63,10 +63,14 @@ else
 fi
 
 # 8. Create project directory
-mkdir -p /opt/propyte
-chmod 755 /opt/propyte
+mkdir -p /opt/datamktmx
+chmod 755 /opt/datamktmx
 
-# 9. Firewall — only allow SSH, HTTP, HTTPS
+# 9. Create log directory for scraper cron output
+mkdir -p /var/log/datamktmx
+chmod 755 /var/log/datamktmx
+
+# 10. Firewall — only allow SSH, HTTP, HTTPS
 echo "[setup] Configuring firewall..."
 if command -v ufw &> /dev/null; then
     ufw allow ssh
@@ -75,7 +79,7 @@ if command -v ufw &> /dev/null; then
     ufw --force enable
 fi
 
-# 10. Disable password auth (SSH keys only)
+# 11. Disable password auth (SSH keys only)
 echo "[setup] Hardening SSH..."
 sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config

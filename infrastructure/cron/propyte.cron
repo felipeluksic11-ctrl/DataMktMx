@@ -8,6 +8,7 @@
 # Portal status:
 #   Lamudi       — ACTIVE  (direct, no proxy)
 #   Propiedades  — ACTIVE  (direct, no proxy)
+#   Properstar   — ACTIVE  (direct, no proxy, Azure WAF)
 #   Inmuebles24  — DISABLED (Cloudflare blocks DataImpulse MX pool)
 #   Vivanuncios  — DISABLED (untested)
 #
@@ -17,48 +18,61 @@
 #   Monthly total:      ~3-5 GB proxy
 #   Remaining:          ~45 GB for I24/Vivanuncios when enabled
 
+# Environment: source .env so docker compose picks up credentials
+SHELL=/bin/bash
+DATAMKTMX_DIR=/opt/datamktmx
+
 # ═══════════════════════════════════════════════════════════════
 # Phase 1: Daily incremental — cards-only, per-portal, staggered
 # ═══════════════════════════════════════════════════════════════
 
 # Lamudi — 2:00am Mexico / 8:00am UTC (direct, no proxy cost)
-0 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers lamudi --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scraper-lamudi.log 2>&1
+0 8 * * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-lamudi-daily scraper-core python -m scrapers lamudi --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scraper-lamudi.log 2>&1
 
 # Propiedades — 2:30am Mexico / 8:30am UTC
-30 8 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers propiedades --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scraper-propiedades.log 2>&1
+30 8 * * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-propiedades-daily scraper-core python -m scrapers propiedades --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scraper-propiedades.log 2>&1
 
 # Inmuebles24 — DISABLED (Cloudflare blocked with DataImpulse MX proxy)
-# 0 9 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers inmuebles24 --mode incremental --no-detail --budget 500 >> /var/log/datamktmx/scraper-i24.log 2>&1
+# 0 9 * * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-i24-daily scraper-core python -m scrapers inmuebles24 --mode incremental --no-detail --budget 500 >> /var/log/datamktmx/scraper-i24.log 2>&1
+
+# Properstar — 3:00am Mexico / 9:00am UTC (direct, no proxy cost, Azure WAF — longer delays)
+0 9 * * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-properstar-daily scraper-core python -m scrapers properstar --mode incremental --no-detail --budget 300 >> /var/log/datamktmx/scraper-properstar.log 2>&1
 
 # Vivanuncios — DISABLED (untested)
-# 30 9 * * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers vivanuncios --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scraper-vivanuncios.log 2>&1
+# 30 9 * * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-vivanuncios-daily scraper-core python -m scrapers vivanuncios --mode incremental --no-detail --budget 200 >> /var/log/datamktmx/scraper-vivanuncios.log 2>&1
 
 # ═══════════════════════════════════════════════════════════════
 # Monthly full scrape — 1st of month, staggered 30 min apart
 # ═══════════════════════════════════════════════════════════════
 
 # Lamudi full — midnight Mexico / 6:00am UTC
-0 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers lamudi --mode full --no-detail --budget 1500 >> /var/log/datamktmx/scraper-lamudi.log 2>&1
+0 6 1 * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-lamudi-full scraper-core python -m scrapers lamudi --mode full --no-detail --budget 1500 >> /var/log/datamktmx/scraper-lamudi.log 2>&1
 
 # Propiedades full — 12:30am Mexico / 6:30am UTC
-30 6 1 * * cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers propiedades --mode full --no-detail --budget 3000 >> /var/log/datamktmx/scraper-propiedades.log 2>&1
+30 6 1 * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-propiedades-full scraper-core python -m scrapers propiedades --mode full --no-detail --budget 3000 >> /var/log/datamktmx/scraper-propiedades.log 2>&1
+
+# Properstar full — 1:00am Mexico / 7:00am UTC
+0 7 1 * * cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-properstar-full scraper-core python -m scrapers properstar --mode full --no-detail --budget 2000 >> /var/log/datamktmx/scraper-properstar.log 2>&1
 
 # ═══════════════════════════════════════════════════════════════
 # Phase 2: Weekly detail enrichment — per-portal, different days
 # ═══════════════════════════════════════════════════════════════
 
 # Propiedades enrichment — Wednesdays 3am Mexico / 9am UTC
-0 9 * * 3 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers propiedades --enrich --budget 300 >> /var/log/datamktmx/scraper-propiedades.log 2>&1
+0 9 * * 3 cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-propiedades-enrich scraper-core python -m scrapers propiedades --enrich --budget 300 >> /var/log/datamktmx/scraper-propiedades.log 2>&1
 
 # Lamudi enrichment — Thursdays 3am Mexico / 9am UTC
-0 9 * * 4 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m scrapers lamudi --enrich --budget 300 >> /var/log/datamktmx/scraper-lamudi.log 2>&1
+0 9 * * 4 cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-lamudi-enrich scraper-core python -m scrapers lamudi --enrich --budget 300 >> /var/log/datamktmx/scraper-lamudi.log 2>&1
+
+# Properstar enrichment — Fridays 3am Mexico / 9am UTC
+0 9 * * 5 cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm --name scraper-properstar-enrich scraper-core python -m scrapers properstar --enrich --budget 300 >> /var/log/datamktmx/scraper-properstar.log 2>&1
 
 # ═══════════════════════════════════════════════════════════════
 # ETL + Maintenance
 # ═══════════════════════════════════════════════════════════════
 
 # ETL pipeline — Sundays 4am UTC
-0 4 * * 0 cd /opt/datamktmx && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler etl >> /var/log/datamktmx/etl.log 2>&1
+0 4 * * 0 cd $DATAMKTMX_DIR && docker compose -f docker-compose.prod.yml run --rm scraper-core python -m orchestrator.scheduler etl >> /var/log/datamktmx/etl.log 2>&1
 
 # Log rotation — keep 30 days
 0 0 * * * find /var/log/datamktmx -name "*.log" -mtime +30 -delete

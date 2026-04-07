@@ -13,7 +13,7 @@ set -euo pipefail
 VPS_HOST="${1:?Usage: ./deploy.sh user@host}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$(dirname "$SCRIPT_DIR")")"
-REMOTE_DIR="/opt/propyte"
+REMOTE_DIR="/opt/datamktmx"
 
 echo "=== Deploying Propyte to ${VPS_HOST} ==="
 
@@ -35,7 +35,7 @@ rsync -avz --delete \
 # 2. Decrypt secrets on VPS and generate .env
 echo "[deploy] Generating .env from encrypted secrets..."
 ssh "${VPS_HOST}" bash -s << 'REMOTE_SCRIPT'
-cd /opt/propyte
+cd /opt/datamktmx
 
 # Decrypt secrets
 SECRETS=$(sops --decrypt secrets/production.yaml)
@@ -69,7 +69,7 @@ REMOTE_SCRIPT
 # 3. Build and start services
 echo "[deploy] Building and starting services..."
 ssh "${VPS_HOST}" bash -s << 'REMOTE_SCRIPT'
-cd /opt/propyte
+cd /opt/datamktmx
 docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d
 
@@ -87,6 +87,21 @@ docker compose -f docker-compose.prod.yml exec scraper-core \
 
 echo "[remote] Deploy complete"
 docker compose -f docker-compose.prod.yml ps
+REMOTE_SCRIPT
+
+# 4. Install crontab and create log directory
+echo "[deploy] Setting up cron automation..."
+ssh "${VPS_HOST}" bash -s << 'REMOTE_SCRIPT'
+# Create log directory for scraper cron output
+mkdir -p /var/log/datamktmx
+chmod 755 /var/log/datamktmx
+
+# Install crontab (replaces existing crontab for this user)
+crontab /opt/datamktmx/infrastructure/cron/propyte.cron
+echo "[remote] Crontab installed:"
+crontab -l | head -5
+echo "..."
+echo "[remote] Log directory ready at /var/log/datamktmx/"
 REMOTE_SCRIPT
 
 echo "=== Deploy finished ==="

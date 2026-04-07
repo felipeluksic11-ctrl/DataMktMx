@@ -12,6 +12,7 @@ from scrapers.lamudi import LamudiScraper
 from scrapers.lamudi.http_scraper import LamudiHttpScraper
 from scrapers.propiedades import PropiedadesScraper
 from scrapers.propiedades.http_scraper import PropiedadesHttpScraper
+from scrapers.properstar import PropertystarScraper
 from scrapers.vivanuncios import VivanunciosScraper
 from scrapers.storage import upsert_raw_listings
 from etl.exporters.supabase import sync_to_supabase
@@ -31,6 +32,7 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
     "inmuebles24": Inmuebles24Scraper,
     "lamudi": LamudiScraper,
     "propiedades": PropiedadesScraper,
+    "properstar": PropertystarScraper,
     "vivanuncios": VivanunciosScraper,
 }
 
@@ -39,7 +41,7 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
 # for detail enrichment.
 HTTP_SCRAPER_REGISTRY: dict[str, type[HttpScraper]] = {
     "lamudi": LamudiHttpScraper,
-    "propiedades": PropiedadesHttpScraper,
+    # propiedades: httpx times out from VPS — use browser scraper
 }
 
 
@@ -341,6 +343,9 @@ async def run_enrichment(portal_slug: str, **kwargs) -> None:
     elif portal_slug == "lamudi":
         from scrapers.lamudi.parser import parse_detail_page
         from scrapers.lamudi import config as portal_config
+    elif portal_slug == "properstar":
+        from scrapers.properstar.parser import parse_detail_page
+        from scrapers.properstar import config as portal_config
     elif portal_slug == "vivanuncios":
         from scrapers.inmuebles24.parser import parse_detail_page
         from scrapers.vivanuncios import config as portal_config

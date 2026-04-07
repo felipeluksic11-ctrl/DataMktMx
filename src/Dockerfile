@@ -45,8 +45,9 @@ RUN pip install --upgrade pip && pip install \
     "dramatiq[redis]>=1.17.0" \
     "selectolax>=0.3.0"
 
-# Install Playwright browsers
+# Install Playwright browsers + Camoufox browser binary
 RUN playwright install chromium --with-deps
+RUN camoufox fetch
 
 COPY . .
 

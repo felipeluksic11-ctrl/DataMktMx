@@ -26,7 +26,7 @@ PORTALS = [
         "slug": "propiedades",
         "base_url": "https://propiedades.com",
         "scraper_module": "scrapers.propiedades",
-        "is_active": False,
+        "is_active": True,
         "avg_listings": 80000,
         "notes": "Segundo portal. También de Navent.",
     },
@@ -53,7 +53,7 @@ PORTALS = [
         "slug": "lamudi",
         "base_url": "https://www.lamudi.com.mx",
         "scraper_module": "scrapers.lamudi",
-        "is_active": False,
+        "is_active": True,
         "avg_listings": 50000,
         "notes": "Portal de EMPG (Emerging Markets Property Group).",
     },
@@ -75,6 +75,15 @@ PORTALS = [
         "avg_listings": None,
         "notes": "Via Apify actors inicialmente. Volumen desconocido.",
     },
+    {
+        "name": "Properstar",
+        "slug": "properstar",
+        "base_url": "https://www.properstar.com.mx",
+        "scraper_module": "scrapers.properstar",
+        "is_active": True,
+        "avg_listings": 165000,
+        "notes": "Portal de ListGlobally (Suiza). Azure WAF. SSR React. 25 estados indexados.",
+    },
 ]
 
 
@@ -89,7 +98,12 @@ async def seed() -> None:
             existing = result.scalar_one_or_none()
 
             if existing:
-                logger.info("seed.portal_exists", slug=portal_data["slug"])
+                # Update is_active to match seed data
+                if existing.is_active != portal_data["is_active"]:
+                    existing.is_active = portal_data["is_active"]
+                    logger.info("seed.portal_updated", slug=portal_data["slug"], is_active=portal_data["is_active"])
+                else:
+                    logger.info("seed.portal_exists", slug=portal_data["slug"])
                 continue
 
             portal = Portal(**portal_data)
