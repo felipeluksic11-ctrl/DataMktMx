@@ -47,7 +47,7 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
 HTTP_SCRAPER_REGISTRY: dict[str, type[HttpScraper]] = {
     "lamudi": LamudiHttpScraper,
     "properstar": PropertystarHttpScraper,
-    "propiedades": PropiedadesHttpScraper,  # hybrid: CookieBridge solves, httpx scrapes
+    # propiedades: CookieBridge cookies are geo-locked to CDMX — must use browser scraper
 }
 
 
