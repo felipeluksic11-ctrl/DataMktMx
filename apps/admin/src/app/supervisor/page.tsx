@@ -2,11 +2,20 @@ import { fetchAPI } from '@/lib/api';
 import { SupervisorTabs } from './supervisor-tabs';
 
 export default async function SupervisorPage() {
-  const [runsData, repairs, configs] = await Promise.all([
-    fetchAPI('/supervisors/runs?limit=20'),
-    fetchAPI('/supervisors/repairs?limit=20'),
-    fetchAPI('/supervisors/configs'),
-  ]);
+  let runs: unknown[] = [];
+  let repairs: unknown[] = [];
+  let configs: unknown[] = [];
+
+  try {
+    const [runsData, repairsData, configsData] = await Promise.all([
+      fetchAPI('/supervisors/runs?limit=20'),
+      fetchAPI('/supervisors/repairs?limit=20'),
+      fetchAPI('/supervisors/configs'),
+    ]);
+    runs = runsData.data || [];
+    repairs = repairsData.data || [];
+    configs = configsData || [];
+  } catch { /* fallback to defaults */ }
 
   return (
     <div className="space-y-6">
@@ -18,9 +27,9 @@ export default async function SupervisorPage() {
       </div>
 
       <SupervisorTabs
-        runs={runsData.data}
-        repairs={repairs.data}
-        configs={configs}
+        runs={runs as []}
+        repairs={repairs as []}
+        configs={configs as []}
       />
     </div>
   );

@@ -2,7 +2,14 @@ import { fetchAPI } from '@/lib/api';
 import { AuditTimeline } from './audit-timeline';
 
 export default async function AuditPage() {
-  const data = await fetchAPI('/audit?limit=50');
+  let entries: unknown[] = [];
+  let total = 0;
+
+  try {
+    const data = await fetchAPI('/audit?limit=50');
+    entries = data.data || [];
+    total = data.total || 0;
+  } catch { /* fallback to defaults */ }
 
   return (
     <div className="space-y-6">
@@ -13,7 +20,7 @@ export default async function AuditPage() {
         </p>
       </div>
 
-      <AuditTimeline initialEntries={data.data} initialTotal={data.total} />
+      <AuditTimeline initialEntries={entries as []} initialTotal={total} />
     </div>
   );
 }

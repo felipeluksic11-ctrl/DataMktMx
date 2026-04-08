@@ -2,11 +2,17 @@ import { fetchAPI } from '@/lib/api';
 import { AutomationTabs } from './automation-tabs';
 
 export default async function AutomationPage() {
-  const [schedules, health, groups] = await Promise.all([
-    fetchAPI('/schedules'),
-    fetchAPI('/schedules/health'),
-    fetchAPI('/schedules/groups'),
-  ]);
+  let schedules = [];
+  let health = { running: 0, queued: 0, totalSchedules: 0, nextRun: null };
+  let groups = [];
+
+  try {
+    [schedules, health, groups] = await Promise.all([
+      fetchAPI('/schedules'),
+      fetchAPI('/schedules/health'),
+      fetchAPI('/schedules/groups'),
+    ]);
+  } catch { /* fallback to defaults */ }
 
   return (
     <div className="space-y-6">

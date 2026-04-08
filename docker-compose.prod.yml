@@ -189,9 +189,12 @@ services:
     container_name: scraper-admin
     restart: unless-stopped
     environment:
+      API_URL: http://scraper-api:3001/api/v1
       NEXT_PUBLIC_API_URL: http://204.168.140.53:3001/api/v1
     ports:
       - "3000:3000"
+    depends_on:
+      - api
     networks:
       - propyte
 
