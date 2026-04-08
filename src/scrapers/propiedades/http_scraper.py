@@ -122,13 +122,14 @@ class PropiedadesHttpScraper(HttpScraper):
 
             consecutive_empty = 0
 
-            # Enrich with operation and state
+            # Enrich with operation; use region from HTML as state (fallback to URL slug)
             for p in partials:
                 # Use badge_operation if available, else from search
                 p["operation"] = p.pop(
                     "badge_operation", None,
                 ) or operation
-                p["state"] = state_name
+                # Prefer addressRegion from HTML over search URL slug
+                p["state"] = p.get("region") or state_name
                 p["country"] = "Mexico"
 
             page_items = [self._partial_to_item(p) for p in partials]

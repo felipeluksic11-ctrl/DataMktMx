@@ -95,7 +95,13 @@ def parse_search_html(html: str) -> list[dict]:
                 locality_el.attributes.get("content", "").strip()
                 or None
             )
-        # region_el available but not used in card output
+        region_el = card.css_first(config.SELECTORS["card_region"])
+        region = None
+        if region_el:
+            region = (
+                region_el.attributes.get("content", "").strip()
+                or None
+            )
         zip_code = None
         if postal_el:
             zip_code = (
@@ -146,6 +152,7 @@ def parse_search_html(html: str) -> list[dict]:
             "street_and_number": street,
             "neighborhood": neighborhood,
             "municipality": municipality,
+            "region": region,  # addressRegion from HTML — real state of the listing
             "zip_code": zip_code,
             "latitude": latitude,
             "longitude": longitude,

@@ -150,11 +150,12 @@ class PropiedadesScraper(BaseScraper):
         if not partials:
             return []
 
-        # Enrich with operation and state from search URL
-        state_name = state.replace("-", " ").title()
+        # Enrich with operation; use region from HTML as state (fallback to URL slug)
+        search_state_name = state.replace("-", " ").title()
         for p in partials:
             p["operation"] = p.get("badge_operation") or operation
-            p["state"] = state_name
+            # Prefer addressRegion from the card HTML over the search URL slug
+            p["state"] = p.get("region") or search_state_name
             p["country"] = p.get("country") or "México"
 
         if not self.visit_detail:

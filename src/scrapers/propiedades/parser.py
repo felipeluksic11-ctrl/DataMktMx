@@ -539,6 +539,7 @@ async def parse_search_results(page: Page) -> list[dict]:
             "street_and_number": street,
             "neighborhood": neighborhood,
             "municipality": municipality,
+            "region": region,  # addressRegion from HTML — real state of the listing
             "zip_code": zip_code,
             "latitude": latitude,
             "longitude": longitude,
