@@ -16,13 +16,17 @@ class SupervisorRun(Base):
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default_factory=lambda: str(uuid4()), init=False
     )
+
+    # Required fields (no default) — must come first
     portal_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("portals.id", ondelete="CASCADE")
     )
+    trigger: Mapped[str] = mapped_column(String(20))  # auto_post_scrape | manual | scheduled
+
+    # Optional fields (with defaults)
     scrape_job_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("scrape_jobs.id", ondelete="SET NULL"), default=None
     )
-    trigger: Mapped[str] = mapped_column(String(20))  # auto_post_scrape | manual | scheduled
     status: Mapped[str] = mapped_column(
         String(20), default="running"
     )  # running | completed | failed

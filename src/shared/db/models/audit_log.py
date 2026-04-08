@@ -16,17 +16,21 @@ class AuditLog(Base):
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default_factory=lambda: str(uuid4()), init=False
     )
+
+    # Required fields (no default) — must come first
     entity_type: Mapped[str] = mapped_column(
         String(50)
     )  # schedule | portal | supervisor | repair | config | scrape_job
-    entity_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), default=None)
     action: Mapped[str] = mapped_column(
         String(50)
     )  # created | updated | deleted | enabled | disabled | triggered | applied | rejected
+    summary: Mapped[str] = mapped_column(Text)
+
+    # Optional fields (with defaults)
+    entity_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), default=None)
     actor: Mapped[str] = mapped_column(String(50), default="system")  # system | admin | scheduler | supervisor
     is_automatic: Mapped[bool] = mapped_column(Boolean, default=False)
     is_success: Mapped[bool] = mapped_column(Boolean, default=True)
-    summary: Mapped[str] = mapped_column(Text)
     diff: Mapped[dict | None] = mapped_column(JSONB, default=None)  # {field: {old, new}}
     tags: Mapped[list | None] = mapped_column(ARRAY(String), default=None)
     metadata_: Mapped[dict | None] = mapped_column("metadata", JSONB, default=None)

@@ -16,19 +16,21 @@ class ScheduleConfig(Base):
     id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), primary_key=True, default_factory=lambda: str(uuid4()), init=False
     )
+
+    # Required fields (no default) — must come first for dataclass ordering
     name: Mapped[str] = mapped_column(String(100))
     portal_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False), ForeignKey("portals.id", ondelete="CASCADE")
     )
+    mode: Mapped[str] = mapped_column(String(20))  # incremental | full | enrich
+    cron_expression: Mapped[str] = mapped_column(String(100))
+    budget_mb: Mapped[float] = mapped_column(Float)
+
+    # Optional fields (with defaults)
     group_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False), ForeignKey("schedule_groups.id", ondelete="SET NULL"), default=None
     )
-    mode: Mapped[str] = mapped_column(String(20))  # incremental | full | enrich
-    cron_expression: Mapped[str] = mapped_column(String(100))
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-
-    # Execution parameters
-    budget_mb: Mapped[float] = mapped_column(Float)
     states: Mapped[list | None] = mapped_column(JSONB, default=None)  # null = use PHASE1_STATES
     visit_detail: Mapped[bool] = mapped_column(Boolean, default=False)
 
