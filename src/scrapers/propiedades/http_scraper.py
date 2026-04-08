@@ -47,19 +47,26 @@ class PropiedadesHttpScraper(HttpScraper):
             from scrapers.base.modes import INCREMENTAL_MAX_PAGES
             self.max_pages = min(max_pages, INCREMENTAL_MAX_PAGES)
 
-    async def _get_bridge(self) -> CookieBridge:
-        if self._bridge is None:
-            self._bridge = CookieBridge(
-                base_url=config.BASE_URL,
-                card_selector=config.SELECTORS["listing_card"],
-                timeout_s=60.0,
-            )
+    async def _get_bridge_for_state(self, state_url: str) -> CookieBridge:
+        """Get a fresh CookieBridge solved for a specific state URL.
+
+        Propiedades.com ties session cookies to the first URL visited.
+        We must solve the WAF per state to get state-specific results.
+        """
+        if self._bridge:
+            await self._bridge.close()
+        self._bridge = CookieBridge(
+            base_url=state_url,
+            card_selector=config.SELECTORS["listing_card"],
+            timeout_s=60.0,
+        )
         return self._bridge
 
     async def fetch_page(self, url: str) -> str | None:
         """Override: use CookieBridge instead of raw httpx."""
-        bridge = await self._get_bridge()
-        return await bridge.get(url)
+        if not self._bridge:
+            return None
+        return await self._bridge.get(url)
 
     def _build_search_url(
         self, state: str, operation: str, page: int,
@@ -107,6 +114,11 @@ class PropiedadesHttpScraper(HttpScraper):
         items: list[ScrapedItem] = []
         state_name = state.replace("-", " ").title()
         consecutive_empty = 0
+
+        # Fresh bridge per state+operation — cookies are tied to the first URL
+        first_url = self._build_search_url(state, operation, 1)
+        await self._get_bridge_for_state(first_url)
+        self.logger.info("http.bridge_reset", state=state, operation=operation)
 
         for page_num in range(1, self.max_pages + 1):
             url = self._build_search_url(state, operation, page_num)
