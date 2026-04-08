@@ -13,6 +13,7 @@ from scrapers.lamudi.http_scraper import LamudiHttpScraper
 from scrapers.propiedades import PropiedadesScraper
 from scrapers.propiedades.http_scraper import PropiedadesHttpScraper
 from scrapers.properstar import PropertystarScraper
+from scrapers.properstar.http_scraper import PropertystarHttpScraper
 from scrapers.vivanuncios import VivanunciosScraper
 from scrapers.storage import upsert_raw_listings
 from etl.exporters.supabase import sync_to_supabase
@@ -41,7 +42,8 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
 # for detail enrichment.
 HTTP_SCRAPER_REGISTRY: dict[str, type[HttpScraper]] = {
     "lamudi": LamudiHttpScraper,
-    # propiedades: httpx times out from VPS — use browser scraper
+    "properstar": PropertystarHttpScraper,
+    "propiedades": PropiedadesHttpScraper,  # hybrid: CookieBridge solves, httpx scrapes
 }
 
 

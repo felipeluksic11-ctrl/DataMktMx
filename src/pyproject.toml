@@ -30,6 +30,9 @@ dependencies = [
     # Scheduling
     "croniter>=2.0.0",
 
+    # TLS fingerprint impersonation (bypasses httpx blocks)
+    "curl_cffi>=0.7.0",
+
     # Utilities
     "pydantic>=2.8.0",
     "pydantic-settings>=2.3.0",

@@ -1,10 +1,10 @@
-"""Propiedades.com HTTP scraper — uses httpx instead of Playwright.
+"""Propiedades.com HTTP scraper — hybrid: browser cookies + httpx speed.
 
 Propiedades.com uses itemprop microdata (Schema.org) in server-side
-rendered HTML, including latitude, longitude, streetAddress, etc.
-This makes it ideal for lightweight HTTP scraping.
+rendered HTML. Pure httpx times out from VPS IP (TLS fingerprint filtered).
 
-Falls back to browser-based PropiedadesScraper if HTTP scraping fails.
+Solution: CookieBridge solves with browser once, then httpx with cookies.
+~10x faster than full browser scraping.
 """
 
 from scrapers.base import ScrapedItem
@@ -12,15 +12,16 @@ from scrapers.base.http_scraper import HttpScraper
 from scrapers.propiedades import config
 from scrapers.propiedades.http_parser import parse_search_html
 from shared.logging import get_logger
+from shared.stealth.cookie_bridge import CookieBridge
 
 logger = get_logger("scraper.propiedades.http")
 
 
 class PropiedadesHttpScraper(HttpScraper):
     portal_slug = "propiedades"
-    portal_name = "Propiedades.com (HTTP)"
+    portal_name = "Propiedades.com (HTTP Hybrid)"
 
-    # Lighter delays — direct VPS IP
+    # Moderate delays — cookies should prevent blocks
     delay_min_ms = 1000
     delay_max_ms = 2500
 
@@ -40,10 +41,25 @@ class PropiedadesHttpScraper(HttpScraper):
         self.states = states or config.STATES
         self.operations = operations or ["venta", "renta"]
         self.max_pages = max_pages
+        self._bridge: CookieBridge | None = None
 
         if mode == "incremental":
             from scrapers.base.modes import INCREMENTAL_MAX_PAGES
             self.max_pages = min(max_pages, INCREMENTAL_MAX_PAGES)
+
+    async def _get_bridge(self) -> CookieBridge:
+        if self._bridge is None:
+            self._bridge = CookieBridge(
+                base_url=config.BASE_URL,
+                card_selector=config.SELECTORS["listing_card"],
+                timeout_s=60.0,
+            )
+        return self._bridge
+
+    async def fetch_page(self, url: str) -> str | None:
+        """Override: use CookieBridge instead of raw httpx."""
+        bridge = await self._get_bridge()
+        return await bridge.get(url)
 
     def _build_search_url(
         self, state: str, operation: str, page: int,
@@ -60,24 +76,28 @@ class PropiedadesHttpScraper(HttpScraper):
     async def scrape(self) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []
 
-        for state in self.states:
-            for operation in self.operations:
-                try:
-                    search_items = await self._scrape_search(
-                        state, operation,
-                    )
-                    items.extend(search_items)
-                    self.logger.info(
-                        "http.search_done",
-                        state=state,
-                        operation=operation,
-                        count=len(search_items),
-                    )
-                except Exception:
-                    self.stats["errors"] += 1
-                    self.logger.exception(
-                        "http.state_error", state=state,
-                    )
+        try:
+            for state in self.states:
+                for operation in self.operations:
+                    try:
+                        search_items = await self._scrape_search(
+                            state, operation,
+                        )
+                        items.extend(search_items)
+                        self.logger.info(
+                            "http.search_done",
+                            state=state,
+                            operation=operation,
+                            count=len(search_items),
+                        )
+                    except Exception:
+                        self.stats["errors"] += 1
+                        self.logger.exception(
+                            "http.state_error", state=state,
+                        )
+        finally:
+            if self._bridge:
+                await self._bridge.close()
 
         return items
 
