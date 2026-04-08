@@ -82,6 +82,47 @@ services:
         limits:
           memory: 4G
 
+  # Scheduler Daemon — replaces cron, manages all scrape scheduling
+  scheduler:
+    build:
+      context: ./src
+      dockerfile: Dockerfile
+    container_name: propyte-scheduler
+    command: python -m orchestrator.scheduler_daemon
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      PROXY_DATAIMPLULSE_URL: ${PROXY_DATAIMPLULSE_URL:-}
+      PROXY_BRIGHTDATA_URL: ${PROXY_BRIGHTDATA_URL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-}
+      SCHEDULER_MAX_CONCURRENT: ${SCHEDULER_MAX_CONCURRENT:-3}
+      SCHEDULER_POLL_INTERVAL: ${SCHEDULER_POLL_INTERVAL:-30}
+      ENVIRONMENT: production
+      LOG_LEVEL: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - propyte
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
   # Dramatiq workers (N instances for distributed scraping)
   dramatiq-worker:
     build:
@@ -126,11 +167,16 @@ services:
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
       PORT: 3001
     ports:
       - "3001:3001"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     networks:
       - propyte

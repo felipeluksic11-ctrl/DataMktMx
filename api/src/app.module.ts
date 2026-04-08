@@ -7,6 +7,9 @@ import { WorkPlansModule } from './work-plans/work-plans.module';
 import { DataModule } from './data/data.module';
 import { ScoutModule } from './scout/scout.module';
 import { AuthModule } from './auth/auth.module';
+import { SchedulesModule } from './schedules/schedules.module';
+import { SupervisorsModule } from './supervisors/supervisors.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -17,6 +20,9 @@ import { AuthModule } from './auth/auth.module';
     DataModule,
     ScoutModule,
     AuthModule,
+    SchedulesModule,
+    SupervisorsModule,
+    AuditModule,
   ],
   controllers: [HealthController],
 })

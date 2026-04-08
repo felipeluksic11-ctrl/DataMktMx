@@ -82,13 +82,17 @@ export default async function DashboardPage() {
   let quality: Quality = { listingsToday: 0, listingsThisWeek: 0, fillRates: {}, overallCompleteness: 0, byPortal: [] };
   let portals: Portal[] = [];
   let aiUsage = { totalCalls: 0, totalCostUsd: 0, todayCostUsd: 0, byPurpose: {} as Record<string, { calls: number; cost: number }> };
+  let schedulerHealth = { running: 0, queued: 0, totalSchedules: 0, nextRun: null as { name: string; nextRunAt: string; portal: string } | null };
+  let recentAudit: { id: string; summary: string; action: string; actor: string; isAutomatic: boolean; isSuccess: boolean; createdAt: string }[] = [];
 
   try {
-    [stats, portals, quality, aiUsage] = await Promise.all([
+    [stats, portals, quality, aiUsage, schedulerHealth, recentAudit] = await Promise.all([
       fetchAPI('/data/stats'),
       fetchAPI('/portals'),
       fetchAPI('/data/quality'),
       fetchAPI('/data/ai-usage').catch(() => aiUsage),
+      fetchAPI('/schedules/health').catch(() => schedulerHealth),
+      fetchAPI('/audit?limit=5').then((d: { data: typeof recentAudit }) => d.data).catch(() => []),
     ]);
   } catch { /* fallback to defaults */ }
 
@@ -146,6 +150,56 @@ export default async function DashboardPage() {
           value={formatRelative(lastScrape)}
           color="slate"
         />
+      </div>
+
+      {/* Row 1.5: System Health + Recent Activity */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Panel title="Salud del Sistema">
+          <div className="grid grid-cols-3 gap-3">
+            <div className="text-center">
+              <p className="text-2xl font-bold text-blue-400">{schedulerHealth.running}</p>
+              <p className="text-xs text-muted-foreground">Corriendo</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-yellow-400">{schedulerHealth.queued}</p>
+              <p className="text-xs text-muted-foreground">En cola</p>
+            </div>
+            <div className="text-center">
+              <p className="text-2xl font-bold text-foreground">{schedulerHealth.totalSchedules}</p>
+              <p className="text-xs text-muted-foreground">Schedules</p>
+            </div>
+          </div>
+          {schedulerHealth.nextRun && (
+            <div className="mt-3 pt-3 border-t border-border text-sm text-muted-foreground">
+              Proximo: <span className="text-foreground font-medium">{schedulerHealth.nextRun.portal}</span>
+              {' — '}
+              {new Date(schedulerHealth.nextRun.nextRunAt).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' })}
+            </div>
+          )}
+        </Panel>
+
+        <Panel title="Actividad Reciente">
+          {recentAudit.length > 0 ? (
+            <div className="space-y-2">
+              {recentAudit.map((entry) => (
+                <div key={entry.id} className="flex items-start gap-2 text-sm">
+                  <span className={`mt-1 h-2 w-2 rounded-full flex-shrink-0 ${
+                    !entry.isSuccess ? 'bg-rose-500' :
+                    entry.isAutomatic ? 'bg-blue-500' : 'bg-emerald-500'
+                  }`} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-foreground truncate">{entry.summary}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {entry.actor} - {formatRelative(entry.createdAt)}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">Sin actividad reciente</p>
+          )}
+        </Panel>
       </div>
 
       {/* Row 2: Operation + Property Type */}

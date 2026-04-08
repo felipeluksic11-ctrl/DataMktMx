@@ -27,6 +27,9 @@ dependencies = [
     # AI supervisors
     "anthropic>=0.30.0",
 
+    # Scheduling
+    "croniter>=2.0.0",
+
     # Utilities
     "pydantic>=2.8.0",
     "pydantic-settings>=2.3.0",

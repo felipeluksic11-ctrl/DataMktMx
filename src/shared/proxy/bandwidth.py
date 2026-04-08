@@ -4,12 +4,13 @@ Tracks real bytes transferred through the proxy and enforces
 a configurable budget limit. When exceeded, raises BudgetExhausted
 to stop all scraping before burning through proxy credits.
 
-Usage:
-    tracker = BandwidthTracker.get_instance()
+Usage (standalone — for concurrent scrapes):
+    tracker = create_tracker(budget_mb=200)
     tracker.add_bytes(1024)
 
-    if tracker.is_over_budget():
-        raise BudgetExhausted(...)
+Usage (singleton — backward-compatible with existing code):
+    tracker = BandwidthTracker.get_instance(budget_mb=200)
+    tracker.add_bytes(1024)
 """
 
 import time
@@ -33,11 +34,20 @@ class BudgetExhausted(Exception):
         )
 
 
+def create_tracker(budget_mb: float = 500.0) -> "BandwidthTracker":
+    """Factory: create an independent BandwidthTracker instance.
+
+    Use this for concurrent scrapes where each run needs its own budget.
+    """
+    return BandwidthTracker(budget_mb=budget_mb)
+
+
 @dataclass
 class BandwidthTracker:
-    """Singleton tracker for proxy bandwidth usage across all scrapers.
+    """Tracker for proxy bandwidth usage.
 
-    Tracks bytes per scrape session with budget enforcement.
+    Supports both singleton (backward-compatible) and factory patterns.
+    For concurrent scrapes, use create_tracker() to get independent instances.
     """
 
     # Budget in MB for this scrape session (default 500 MB = 0.5 GB)
@@ -57,11 +67,16 @@ class BandwidthTracker:
     _warned: bool = False
     _lock: Lock = field(default_factory=Lock)
 
-    # Singleton
+    # Singleton (backward-compatible)
     _instance: "BandwidthTracker | None" = None
 
     @classmethod
     def get_instance(cls, budget_mb: float | None = None) -> "BandwidthTracker":
+        """Get or create the global singleton instance.
+
+        Backward-compatible with existing code. For concurrent scrapes,
+        use create_tracker() instead.
+        """
         if cls._instance is None:
             cls._instance = cls(budget_mb=budget_mb or 500.0)
         elif budget_mb is not None:

@@ -2,7 +2,7 @@ import datetime
 from uuid import uuid4
 
 from sqlalchemy import String, Boolean, DateTime, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from shared.db.base import Base
@@ -23,6 +23,7 @@ class Portal(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     avg_listings: Mapped[int | None] = mapped_column(default=None)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
+    selector_overrides: Mapped[dict] = mapped_column(JSONB, default_factory=dict)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), init=False
     )

@@ -22,7 +22,7 @@ from shared.config import settings
 from shared.db.models import Portal, ScrapeJob
 from shared.db.session import get_engine, get_session_factory
 from shared.logging import get_logger, setup_logging
-from shared.proxy.bandwidth import BandwidthTracker, BudgetExhausted
+from shared.proxy.bandwidth import BandwidthTracker, BudgetExhausted, create_tracker
 from shared.proxy.manager import ProxyManager
 
 logger = get_logger("scraper.runner")
@@ -53,13 +53,44 @@ def _get_portal_config(portal_slug: str):
         return None
 
 
-async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
+def _apply_selector_overrides(portal_slug: str, overrides: dict) -> int:
+    """Merge DB selector overrides on top of static config.SELECTORS.
+
+    Returns the number of overrides applied.
+    """
+    if not overrides:
+        return 0
+
+    config = _get_portal_config(portal_slug)
+    if not config or not hasattr(config, "SELECTORS"):
+        return 0
+
+    applied = 0
+    for field, selector in overrides.items():
+        if field in config.SELECTORS and config.SELECTORS[field] != selector:
+            config.SELECTORS[field] = selector
+            applied += 1
+
+    return applied
+
+
+async def run_scraper(
+    portal_slug: str,
+    mode: str = "full",
+    tracker: BandwidthTracker | None = None,
+    **kwargs,
+) -> ScrapeJob | None:
     """Run a single scraper by portal slug.
 
     Args:
         portal_slug: which portal to scrape
         mode: "full" (all pages) or "incremental" (recent only, stop on known)
+        tracker: optional BandwidthTracker instance (for concurrent scrapes).
+                 If None, uses the global singleton.
         **kwargs: passed to the scraper constructor (states, operations, etc.)
+
+    Returns:
+        The ScrapeJob if completed, or None if skipped.
     """
     setup_logging()
 
@@ -67,7 +98,7 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     portal_config = _get_portal_config(portal_slug)
     if portal_config and not getattr(portal_config, "IS_ENABLED", True):
         logger.warning("runner.portal_disabled", slug=portal_slug)
-        return
+        return None
 
     # Default to PHASE1_STATES if --states was not passed
     if "states" not in kwargs or kwargs.get("states") is None:
@@ -77,8 +108,9 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
                 kwargs["states"] = phase1
                 logger.info("runner.using_phase1_states", portal=portal_slug, count=len(phase1))
 
-    # Get bandwidth tracker (already initialized in main() with correct budget)
-    tracker = BandwidthTracker.get_instance()
+    # Use provided tracker or fall back to global singleton
+    if tracker is None:
+        tracker = BandwidthTracker.get_instance()
     logger.info(
         "runner.budget_set",
         budget_mb=tracker.budget_mb,
@@ -88,10 +120,11 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     scraper_cls = SCRAPER_REGISTRY.get(portal_slug)
     if not scraper_cls:
         logger.error("runner.unknown_portal", slug=portal_slug)
-        return
+        return None
 
     session_factory = get_session_factory()
     proxy_manager = ProxyManager.from_settings()
+    job = None
 
     async with session_factory() as session:
         # Find portal
@@ -101,11 +134,17 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
 
         if not portal:
             logger.error("runner.portal_not_found", slug=portal_slug)
-            return
+            return None
 
         if not portal.is_active:
             logger.warning("runner.portal_inactive", slug=portal_slug)
-            return
+            return None
+
+        # Apply DB selector overrides if any
+        if portal.selector_overrides:
+            n = _apply_selector_overrides(portal_slug, portal.selector_overrides)
+            if n:
+                logger.info("runner.selector_overrides_applied", portal=portal_slug, count=n)
 
         # For incremental mode: load known listings cache
         known_cache = None
@@ -254,12 +293,15 @@ async def run_scraper(portal_slug: str, mode: str = "full", **kwargs) -> None:
     # Log final bandwidth stats
     tracker.log_summary()
 
-    # Dispose engine
-    engine = get_engine()
-    await engine.dispose()
+    # Dispose engine only when running standalone (not from scheduler daemon)
+    if kwargs.get("_dispose_engine", True):
+        engine = get_engine()
+        await engine.dispose()
+
+    return job
 
 
-async def run_enrichment(portal_slug: str, **kwargs) -> None:
+async def run_enrichment(portal_slug: str, tracker: BandwidthTracker | None = None, **kwargs) -> ScrapeJob | None:
     """Enrich incomplete listings by visiting their detail pages.
 
     Only visits listings that are missing key fields (construction_m2,
@@ -270,17 +312,19 @@ async def run_enrichment(portal_slug: str, **kwargs) -> None:
     """
     setup_logging()
 
-    # Get bandwidth tracker (already initialized in main() with correct budget)
-    tracker = BandwidthTracker.get_instance()
+    # Use provided tracker or fall back to global singleton
+    if tracker is None:
+        tracker = BandwidthTracker.get_instance()
     logger.info("runner.enrich_start", portal=portal_slug, budget_mb=tracker.budget_mb)
 
     scraper_cls = SCRAPER_REGISTRY.get(portal_slug)
     if not scraper_cls:
         logger.error("runner.unknown_portal", slug=portal_slug)
-        return
+        return None
 
     session_factory = get_session_factory()
     proxy_manager = ProxyManager.from_settings()
+    job = None
 
     async with session_factory() as session:
         # Find portal
@@ -290,7 +334,7 @@ async def run_enrichment(portal_slug: str, **kwargs) -> None:
 
         if not portal:
             logger.error("runner.portal_not_found", slug=portal_slug)
-            return
+            return None
 
         # Query listings missing key detail fields
         stmt = (
@@ -314,7 +358,7 @@ async def run_enrichment(portal_slug: str, **kwargs) -> None:
 
         if not incomplete:
             logger.info("runner.enrich_nothing", portal=portal_slug)
-            return
+            return None
 
         logger.info(
             "runner.enrich_found",
@@ -457,8 +501,11 @@ async def run_enrichment(portal_slug: str, **kwargs) -> None:
         target_count=len(enrich_targets),
     )
 
-    engine = get_engine()
-    await engine.dispose()
+    if kwargs.get("_dispose_engine", True):
+        engine = get_engine()
+        await engine.dispose()
+
+    return job
 
 
 async def run_all_active(mode: str = "full", **kwargs) -> None:

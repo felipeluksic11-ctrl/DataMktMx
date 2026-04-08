@@ -18,10 +18,15 @@ model Portal {
   isActive      Boolean     @default(true) @map("is_active")
   avgListings   Int?        @map("avg_listings")
   notes         String?
+  selectorOverrides Json     @default("{}") @map("selector_overrides")
   createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz
   updatedAt     DateTime    @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
   scrapeJobs    ScrapeJob[]
   workPlans     WorkPlan[]
+  scheduleConfigs ScheduleConfig[]
+  supervisorRuns  SupervisorRun[]
+  repairLogs      RepairLog[]
+  supervisorConfig SupervisorConfig?
 
   @@map("portals")
   @@schema("public")
@@ -40,7 +45,9 @@ model ScrapeJob {
   startedAt    DateTime? @map("started_at") @db.Timestamptz
   finishedAt   DateTime? @map("finished_at") @db.Timestamptz
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  portal       Portal    @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  portal         Portal         @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  scheduleRuns   ScheduleRun[]
+  supervisorRuns SupervisorRun[]
 
   @@map("scrape_jobs")
   @@schema("public")
@@ -133,4 +140,163 @@ model RawListing {
   @@index([operation, propertyType], map: "ix_raw_operation_type")
   @@map("raw_listings")
   @@schema("raw")
+}
+
+// ── Automation tables ──────────────────────────────────────────
+
+model ScheduleGroup {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String           @unique @db.VarChar(100)
+  description    String?
+  isEnabled      Boolean          @default(true) @map("is_enabled")
+  executionMode  String           @default("sequential") @map("execution_mode") @db.VarChar(20)
+  staggerSeconds Int              @default(1800) @map("stagger_seconds")
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  scheduleConfigs ScheduleConfig[]
+
+  @@map("schedule_groups")
+  @@schema("public")
+}
+
+model ScheduleConfig {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name           String         @db.VarChar(100)
+  portalId       String         @map("portal_id") @db.Uuid
+  groupId        String?        @map("group_id") @db.Uuid
+  mode           String         @db.VarChar(20)
+  cronExpression String         @map("cron_expression") @db.VarChar(100)
+  isEnabled      Boolean        @default(true) @map("is_enabled")
+  budgetMb       Float          @map("budget_mb")
+  states         Json?
+  visitDetail    Boolean        @default(false) @map("visit_detail")
+  priority       Int            @default(50)
+  rateLimitS     Int            @default(0) @map("rate_limit_s")
+  maxRetries     Int            @default(3) @map("max_retries")
+  retryBackoffS  Int            @default(300) @map("retry_backoff_s")
+  lastRunAt      DateTime?      @map("last_run_at") @db.Timestamptz
+  lastRunStatus  String?        @map("last_run_status") @db.VarChar(20)
+  nextRunAt      DateTime?      @map("next_run_at") @db.Timestamptz
+  runCount       Int            @default(0) @map("run_count")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  portal         Portal         @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  group          ScheduleGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+  scheduleRuns   ScheduleRun[]
+
+  @@index([portalId], map: "ix_schedule_configs_portal")
+  @@index([nextRunAt], map: "ix_schedule_configs_next_run")
+  @@map("schedule_configs")
+  @@schema("public")
+}
+
+model ScheduleRun {
+  id           String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduleId   String          @map("schedule_id") @db.Uuid
+  scrapeJobId  String?         @map("scrape_job_id") @db.Uuid
+  trigger      String          @db.VarChar(20)
+  status       String          @default("queued") @db.VarChar(20)
+  retryCount   Int             @default(0) @map("retry_count")
+  errorDetail  String?         @map("error_detail")
+  queuedAt     DateTime        @default(now()) @map("queued_at") @db.Timestamptz
+  startedAt    DateTime?       @map("started_at") @db.Timestamptz
+  finishedAt   DateTime?       @map("finished_at") @db.Timestamptz
+  schedule     ScheduleConfig  @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+  scrapeJob    ScrapeJob?      @relation(fields: [scrapeJobId], references: [id], onDelete: SetNull)
+
+  @@index([scheduleId], map: "ix_schedule_runs_schedule")
+  @@index([status], map: "ix_schedule_runs_status")
+  @@map("schedule_runs")
+  @@schema("public")
+}
+
+model SupervisorRun {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portalId         String      @map("portal_id") @db.Uuid
+  scrapeJobId      String?     @map("scrape_job_id") @db.Uuid
+  trigger          String      @db.VarChar(20)
+  status           String      @default("running") @db.VarChar(20)
+  qualityBefore    Json?       @map("quality_before")
+  qualityAfter     Json?       @map("quality_after")
+  diagnosis        Json?
+  repairsSuggested Int         @default(0) @map("repairs_suggested")
+  repairsApplied   Int         @default(0) @map("repairs_applied")
+  repairsQueued    Int         @default(0) @map("repairs_queued")
+  aiCostUsd        Float       @default(0) @map("ai_cost_usd")
+  aiModel          String?     @map("ai_model") @db.VarChar(50)
+  aiTokensIn       Int         @default(0) @map("ai_tokens_in")
+  aiTokensOut      Int         @default(0) @map("ai_tokens_out")
+  durationS        Float?      @map("duration_s")
+  errorDetail      String?     @map("error_detail")
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  portal           Portal      @relation(fields: [portalId], references: [id], onDelete: Cascade)
+  scrapeJob        ScrapeJob?  @relation(fields: [scrapeJobId], references: [id], onDelete: SetNull)
+  repairLogs       RepairLog[]
+
+  @@index([portalId], map: "ix_supervisor_runs_portal")
+  @@map("supervisor_runs")
+  @@schema("public")
+}
+
+model RepairLog {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  supervisorRunId  String         @map("supervisor_run_id") @db.Uuid
+  portalId         String         @map("portal_id") @db.Uuid
+  field            String         @db.VarChar(50)
+  oldSelector      String?        @map("old_selector")
+  newSelector      String?        @map("new_selector")
+  confidence       Float?
+  dataPresent      Boolean?       @map("data_present")
+  extractionMethod String?        @map("extraction_method") @db.VarChar(50)
+  reason           String?
+  status           String         @default("suggested") @db.VarChar(20)
+  appliedAt        DateTime?      @map("applied_at") @db.Timestamptz
+  appliedBy        String?        @map("applied_by") @db.VarChar(50)
+  qualityBefore    Float?         @map("quality_before")
+  qualityAfter     Float?         @map("quality_after")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz
+  supervisorRun    SupervisorRun  @relation(fields: [supervisorRunId], references: [id], onDelete: Cascade)
+  portal           Portal         @relation(fields: [portalId], references: [id], onDelete: Cascade)
+
+  @@index([portalId], map: "ix_repair_logs_portal")
+  @@index([status], map: "ix_repair_logs_status")
+  @@map("repair_logs")
+  @@schema("public")
+}
+
+model SupervisorConfig {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  portalId              String   @unique @map("portal_id") @db.Uuid
+  isEnabled             Boolean  @default(true) @map("is_enabled")
+  runAfterScrape        Boolean  @default(true) @map("run_after_scrape")
+  autoApplyThreshold    Float    @default(0.9) @map("auto_apply_threshold")
+  queueReviewThreshold  Float    @default(0.5) @map("queue_review_threshold")
+  maxDailyCostUsd       Float    @default(1.0) @map("max_daily_cost_usd")
+  cronExpression        String?  @map("cron_expression") @db.VarChar(100)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  portal                Portal   @relation(fields: [portalId], references: [id], onDelete: Cascade)
+
+  @@map("supervisor_configs")
+  @@schema("public")
+}
+
+model AuditLog {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  entityType  String   @map("entity_type") @db.VarChar(50)
+  entityId    String?  @map("entity_id") @db.Uuid
+  action      String   @db.VarChar(50)
+  actor       String   @default("system") @db.VarChar(50)
+  isAutomatic Boolean  @default(false) @map("is_automatic")
+  isSuccess   Boolean  @default(true) @map("is_success")
+  summary     String
+  diff        Json?
+  tags        String[] @default([])
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([entityType, entityId], map: "ix_audit_log_entity")
+  @@index([createdAt], map: "ix_audit_log_created")
+  @@map("audit_log")
+  @@schema("public")
 }
