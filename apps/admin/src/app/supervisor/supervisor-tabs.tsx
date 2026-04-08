@@ -100,12 +100,18 @@ function DiagnosticsTab({
   onRefresh: () => void;
 }) {
   const [diagLoading, setDiagLoading] = useState<string | null>(null);
+  const [diagSuccess, setDiagSuccess] = useState<string | null>(null);
 
   async function handleDiagnose(portalId: string) {
     setDiagLoading(portalId);
+    setDiagSuccess(null);
     try {
       await fetchAPI(`/supervisors/diagnose/${portalId}`, { method: 'POST' });
-      onRefresh();
+      setDiagSuccess(portalId);
+      // Wait for diagnosis to complete, then refresh
+      setTimeout(() => onRefresh(), 20000);
+    } catch {
+      setDiagSuccess(null);
     } finally {
       setDiagLoading(null);
     }
@@ -146,10 +152,18 @@ function DiagnosticsTab({
               )}
               <button
                 onClick={() => handleDiagnose(c.portal.id)}
-                disabled={diagLoading === c.portal.id}
-                className="w-full rounded bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground hover:bg-accent/80 disabled:opacity-50"
+                disabled={diagLoading === c.portal.id || diagSuccess === c.portal.id}
+                className={`w-full rounded px-3 py-1.5 text-xs font-medium disabled:opacity-50 ${
+                  diagSuccess === c.portal.id
+                    ? 'bg-green-600 text-white'
+                    : 'bg-accent text-accent-foreground hover:bg-accent/80'
+                }`}
               >
-                {diagLoading === c.portal.id ? 'Enviando...' : 'Diagnosticar'}
+                {diagLoading === c.portal.id
+                  ? 'Enviando...'
+                  : diagSuccess === c.portal.id
+                    ? 'Diagnostico enviado — analizando (~20s)'
+                    : 'Diagnosticar'}
               </button>
             </div>
           );

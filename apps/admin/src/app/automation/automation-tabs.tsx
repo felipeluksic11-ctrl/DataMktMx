@@ -93,12 +93,17 @@ function SchedulesTab({
   onRefresh: () => void;
 }) {
   const [loading, setLoading] = useState<string | null>(null);
+  const [runSuccess, setRunSuccess] = useState<string | null>(null);
 
   async function handleRunNow(id: string) {
     setLoading(id);
+    setRunSuccess(null);
     try {
       await fetchAPI(`/schedules/${id}/run-now`, { method: 'POST' });
-      onRefresh();
+      setRunSuccess(id);
+      setTimeout(() => { setRunSuccess(null); onRefresh(); }, 5000);
+    } catch {
+      setRunSuccess(null);
     } finally {
       setLoading(null);
     }
@@ -203,10 +208,14 @@ function SchedulesTab({
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => handleRunNow(s.id)}
-                    disabled={loading === s.id}
-                    className="rounded bg-accent px-3 py-1 text-xs font-medium text-accent-foreground hover:bg-accent/80 disabled:opacity-50"
+                    disabled={loading === s.id || runSuccess === s.id}
+                    className={`rounded px-3 py-1 text-xs font-medium disabled:opacity-50 ${
+                      runSuccess === s.id
+                        ? 'bg-green-600 text-white'
+                        : 'bg-accent text-accent-foreground hover:bg-accent/80'
+                    }`}
                   >
-                    {loading === s.id ? 'Enviando...' : 'Run Now'}
+                    {loading === s.id ? 'Enviando...' : runSuccess === s.id ? 'Enviado' : 'Run Now'}
                   </button>
                 </td>
               </tr>
