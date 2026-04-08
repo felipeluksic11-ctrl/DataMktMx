@@ -38,7 +38,9 @@ class PropertystarHttpScraper(HttpScraper):
         known_cache=None,
         **kwargs,
     ):
-        super().__init__(mode=mode, known_cache=known_cache, **kwargs)
+        super().__init__()
+        self.mode = mode
+        self.known_cache = known_cache
         self.states = states or config.PHASE1_STATES
         self.operations = operations or ["venta", "alquiler"]
         self.max_pages = max_pages

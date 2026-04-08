@@ -24,8 +24,7 @@ import httpx
 
 from shared.logging import get_logger
 from shared.proxy.manager import ProxyManager
-from shared.stealth.browser import BrowserConfig, create_stealth_browser
-from shared.stealth.identity import create_identity
+from shared.stealth.browser import create_stealth_browser
 
 logger = get_logger("stealth.cookie_bridge")
 
@@ -80,10 +79,8 @@ class CookieBridge:
     async def _solve_challenge(self, url: str | None = None) -> None:
         """Launch browser, navigate to a page, solve WAF, capture cookies."""
         solve_url = url or self.base_url
-        identity = create_identity()
 
         browser, context = await create_stealth_browser(
-            config=BrowserConfig(headless=True),
             proxy_manager=self.proxy_manager,
         )
 
