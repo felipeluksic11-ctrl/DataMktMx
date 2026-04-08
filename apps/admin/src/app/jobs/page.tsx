@@ -2,21 +2,29 @@ import { fetchAPI } from '@/lib/api';
 
 interface ScrapeJob {
   id: string;
-  portalName: string;
   status: string;
-  scraped: number;
-  new: number;
-  errors: number;
+  totalScraped: number;
+  totalNew: number;
+  totalUpdated: number;
+  totalErrors: number;
+  metadata: { mode?: string } | null;
   startedAt: string | null;
-  duration: number | null;
+  finishedAt: string | null;
+  portal: { name: string; slug: string };
 }
 
 async function getJobs(): Promise<ScrapeJob[]> {
   try {
-    return await fetchAPI('/scrape-jobs');
+    const res = await fetchAPI('/scrape-jobs?limit=50');
+    return res.data ?? res;
   } catch {
     return [];
   }
+}
+
+function getDuration(startedAt: string | null, finishedAt: string | null): number | null {
+  if (!startedAt || !finishedAt) return null;
+  return Math.floor((new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000);
 }
 
 export default async function JobsPage() {
@@ -33,9 +41,10 @@ export default async function JobsPage() {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="px-6 py-3 font-medium">Portal</th>
                 <th className="px-6 py-3 font-medium">Estado</th>
-                <th className="px-6 py-3 font-medium">Scraped</th>
-                <th className="px-6 py-3 font-medium">Nuevos</th>
-                <th className="px-6 py-3 font-medium">Errores</th>
+                <th className="px-6 py-3 font-medium">Modo</th>
+                <th className="px-6 py-3 font-medium text-right">Scraped</th>
+                <th className="px-6 py-3 font-medium text-right">Nuevos</th>
+                <th className="px-6 py-3 font-medium text-right">Errores</th>
                 <th className="px-6 py-3 font-medium">Inicio</th>
                 <th className="px-6 py-3 font-medium">Duracion</th>
               </tr>
@@ -43,34 +52,42 @@ export default async function JobsPage() {
             <tbody className="divide-y">
               {jobs.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-muted-foreground">
+                  <td colSpan={8} className="px-6 py-8 text-center text-muted-foreground">
                     No hay jobs registrados
                   </td>
                 </tr>
               ) : (
-                jobs.map((job) => (
-                  <tr key={job.id}>
-                    <td className="px-6 py-3 font-medium">{job.portalName}</td>
-                    <td className="px-6 py-3">
-                      <JobStatusBadge status={job.status} />
-                    </td>
-                    <td className="px-6 py-3">{job.scraped.toLocaleString()}</td>
-                    <td className="px-6 py-3">{job.new.toLocaleString()}</td>
-                    <td className="px-6 py-3">
-                      {job.errors > 0 ? (
-                        <span className="text-red-400">{job.errors}</span>
-                      ) : (
-                        job.errors
-                      )}
-                    </td>
-                    <td className="px-6 py-3 text-muted-foreground">
-                      {job.startedAt ? new Date(job.startedAt).toLocaleString('es-MX', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
-                    </td>
-                    <td className="px-6 py-3 text-muted-foreground">
-                      {job.duration != null ? formatDuration(job.duration) : '—'}
-                    </td>
-                  </tr>
-                ))
+                jobs.map((job) => {
+                  const duration = getDuration(job.startedAt, job.finishedAt);
+                  return (
+                    <tr key={job.id} className="hover:bg-muted/50">
+                      <td className="px-6 py-3 font-medium">{job.portal?.name ?? '—'}</td>
+                      <td className="px-6 py-3">
+                        <JobStatusBadge status={job.status} />
+                      </td>
+                      <td className="px-6 py-3 text-muted-foreground text-xs">
+                        {job.metadata?.mode ?? '—'}
+                      </td>
+                      <td className="px-6 py-3 text-right tabular-nums">{job.totalScraped.toLocaleString()}</td>
+                      <td className="px-6 py-3 text-right tabular-nums">{job.totalNew.toLocaleString()}</td>
+                      <td className="px-6 py-3 text-right">
+                        {job.totalErrors > 0 ? (
+                          <span className="text-red-400">{job.totalErrors}</span>
+                        ) : (
+                          <span className="text-muted-foreground">0</span>
+                        )}
+                      </td>
+                      <td className="px-6 py-3 text-muted-foreground">
+                        {job.startedAt
+                          ? new Date(job.startedAt).toLocaleString('es-MX', { timeZone: 'America/Mexico_City', dateStyle: 'short', timeStyle: 'short' })
+                          : '—'}
+                      </td>
+                      <td className="px-6 py-3 text-muted-foreground">
+                        {duration != null ? formatDuration(duration) : '—'}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -86,6 +103,7 @@ function JobStatusBadge({ status }: { status: string }) {
     running: 'bg-blue-500/10 text-blue-400',
     pending: 'bg-yellow-500/10 text-yellow-400',
     failed: 'bg-red-500/10 text-red-400',
+    stopped_budget: 'bg-amber-500/10 text-amber-400',
   };
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-medium ${styles[status] ?? 'bg-muted text-muted-foreground'}`}>
