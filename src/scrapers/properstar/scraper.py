@@ -44,7 +44,7 @@ class PropertystarScraper(BaseScraper):
         self.mode = mode
         self.known_cache = known_cache
         self.states = states or config.STATES
-        self.operations = operations or ["venta"]
+        self.operations = operations or ["venta", "alquiler"]
         self.max_pages = max_pages
         self.visit_detail = visit_detail
 

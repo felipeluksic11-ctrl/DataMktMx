@@ -259,7 +259,7 @@ PROXY_POLICY = "direct"
 
 # Scraping behavior
 # Azure WAF is aggressive — use longer delays
-MAX_PAGES_PER_SEARCH = 200
+MAX_PAGES_PER_SEARCH = 500
 LISTINGS_PER_PAGE = 20
 REQUEST_DELAY_MIN_MS = 3500
 REQUEST_DELAY_MAX_MS = 7000
