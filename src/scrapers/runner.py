@@ -186,6 +186,22 @@ async def run_scraper(
                     total_stats["errors"] += page_stats["errors"]
                     total_stats["pages"] += 1
 
+                    # Update job counters in real-time (every 5 pages)
+                    if total_stats["pages"] % 5 == 0:
+                        async with session_factory() as job_session:
+                            from sqlalchemy import update
+                            await job_session.execute(
+                                update(ScrapeJob)
+                                .where(ScrapeJob.id == job.id)
+                                .values(
+                                    total_scraped=total_stats["new"] + total_stats["updated"],
+                                    total_new=total_stats["new"],
+                                    total_updated=total_stats["updated"],
+                                    total_errors=total_stats["errors"],
+                                )
+                            )
+                            await job_session.commit()
+
                     # Quality check every 10 pages
                     if total_stats["pages"] % 10 == 0:
                         await check_quality(persist_session, portal.id, portal_slug, job.id)
