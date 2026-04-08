@@ -43,7 +43,8 @@ RUN pip install --upgrade pip && pip install \
     "pandas>=2.2.0" \
     "anthropic>=0.30.0" \
     "dramatiq[redis]>=1.17.0" \
-    "selectolax>=0.3.0"
+    "selectolax>=0.3.0" \
+    "croniter>=2.0.0"
 
 # Install Playwright browsers + Camoufox browser binary
 RUN playwright install chromium --with-deps
