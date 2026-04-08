@@ -15,6 +15,8 @@ from scrapers.propiedades.http_scraper import PropiedadesHttpScraper
 from scrapers.properstar import PropertystarScraper
 from scrapers.properstar.http_scraper import PropertystarHttpScraper
 from scrapers.vivanuncios import VivanunciosScraper
+from scrapers.mercadolibre import MercadoLibreScraper
+from scrapers.icasas import ICasasScraper
 from scrapers.storage import upsert_raw_listings
 from etl.exporters.supabase import sync_to_supabase
 from shared.db.models import RawListing
@@ -35,6 +37,8 @@ SCRAPER_REGISTRY: dict[str, type[BaseScraper]] = {
     "propiedades": PropiedadesScraper,
     "properstar": PropertystarScraper,
     "vivanuncios": VivanunciosScraper,
+    "mercadolibre": MercadoLibreScraper,
+    "icasas": ICasasScraper,
 }
 
 # HTTP scrapers — lightweight httpx-based, ~20-40x less bandwidth

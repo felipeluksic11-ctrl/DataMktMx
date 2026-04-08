@@ -1,20 +1,19 @@
-"""Properstar.com.mx scraper — crawls search results and detail pages.
+"""Properstar.com.mx scraper — uses Chromium + JS evaluate.
 
-Properstar is behind Azure WAF with a JS challenge. Requires Playwright/Camoufox.
-Content is SSR — cards are in initial HTML after WAF challenge completes.
-
-Rate limiting is aggressive: 3-4 rapid loads trigger 503 "Service unavailable".
-Uses longer delays (3.5-7s) and retries on WAF blocks.
+Properstar is behind Azure WAF. Chromium (not Camoufox) passes the
+JS challenge more reliably. Data extraction uses page.evaluate() to
+run JavaScript directly in the DOM — faster and more robust than
+CSS selectors with Playwright's query API.
 """
 
 import asyncio
 import random
+import re
 
 from playwright.async_api import Page
 
 from scrapers.base import BaseScraper, ScrapedItem
 from scrapers.properstar import config
-from scrapers.properstar.parser import parse_search_results, parse_detail_page, get_total_results
 from shared.proxy.manager import ProxyManager
 
 
@@ -28,6 +27,9 @@ class PropertystarScraper(BaseScraper):
     rotate_delay_min_s = 5.0
     rotate_delay_max_s = 10.0
 
+    # Force Chromium engine (not Camoufox) — WAF passes better with Chromium
+    _use_chromium = True
+
     def __init__(
         self,
         proxy_manager: ProxyManager | None = None,
@@ -40,27 +42,34 @@ class PropertystarScraper(BaseScraper):
         **kwargs,
     ):
         super().__init__(proxy_manager)
-        self._portal_proxy_policy = getattr(config, "PROXY_POLICY", "proxy_required")
+        self._portal_proxy_policy = getattr(config, "PROXY_POLICY", "direct")
         self.mode = mode
         self.known_cache = known_cache
-        self.states = states or config.STATES
+        self.states = states or config.PHASE1_STATES
         self.operations = operations or ["venta", "alquiler"]
         self.max_pages = max_pages
         self.visit_detail = visit_detail
 
     def _build_search_url(self, state: str, operation: str, page: int) -> str:
-        """Build search URL for a given state, operation, and page number.
-
-        Example: https://www.properstar.com.mx/mexico/jalisco/comprar?p=2
-        """
         op_slug = config.OPERATIONS.get(operation, operation)
-        url = config.SEARCH_URL_TEMPLATE.format(
-            state=state,
-            operation=op_slug,
-        )
+        url = config.SEARCH_URL_TEMPLATE.format(state=state, operation=op_slug)
         if page > 1:
             url += f"?p={page}"
         return url
+
+    async def _init_browser_for_state(self):
+        """Override: use Chromium instead of Camoufox."""
+        from shared.stealth.browser import create_stealth_browser
+        browser, context = await create_stealth_browser(
+            proxy_manager=self.proxy_manager,
+            portal_slug=self.portal_slug,
+            engine="chromium",
+            via_proxy=self._uses_proxy,
+        )
+        self._current_browser = browser
+        self._current_context = context
+        self._pages_since_rotation = 0
+        self._rotate_after = self._next_rotation_threshold()
 
     async def scrape(self) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []
@@ -69,9 +78,7 @@ class PropertystarScraper(BaseScraper):
             await self._init_browser_for_state()
             try:
                 for operation in self.operations:
-                    search_items = await self._scrape_search(
-                        state, operation
-                    )
+                    search_items = await self._scrape_search(state, operation)
                     items.extend(search_items)
                     self.logger.info(
                         "scraper.search_done",
@@ -87,28 +94,25 @@ class PropertystarScraper(BaseScraper):
 
         return items
 
-    async def _scrape_search(
-        self,
-        state: str,
-        operation: str,
-    ) -> list[ScrapedItem]:
-        """Scrape all pages of a search query (state + operation)."""
+    async def _scrape_search(self, state: str, operation: str) -> list[ScrapedItem]:
         items: list[ScrapedItem] = []
-        max_page = self.max_pages
+        consecutive_empty = 0
 
-        for page_num in range(1, max_page + 1):
-            await self._maybe_rotate()
-
+        for page_num in range(1, self.max_pages + 1):
             url = self._build_search_url(state, operation, page_num)
             page = await self._current_context.new_page()
             try:
-                page_items = await self._scrape_search_page(
-                    page, url, operation, state=state, page_num=page_num,
-                )
+                page_items = await self._scrape_page_js(page, url, operation, state, page_num)
 
                 if not page_items:
-                    self.logger.info("scraper.no_more_results", page=page_num, state=state)
-                    break
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2:
+                        self.logger.info("scraper.no_more_results", page=page_num, state=state)
+                        break
+                    page_num += 0  # Don't increment, retry
+                    continue
+
+                consecutive_empty = 0
 
                 if self.on_page_scraped:
                     await self.on_page_scraped(page_items)
@@ -124,141 +128,89 @@ class PropertystarScraper(BaseScraper):
                     state=state,
                 )
 
-                # Longer delays — Azure WAF is aggressive
-                await asyncio.sleep(
-                    random.uniform(
-                        config.REQUEST_DELAY_MIN_MS / 1000,
-                        config.REQUEST_DELAY_MAX_MS / 1000,
-                    )
-                )
+                # Delay between pages
+                await asyncio.sleep(random.uniform(2.0, 4.0))
+
             except Exception:
                 self.stats["errors"] += 1
-                self.logger.exception(
-                    "scraper.page_error", page=page_num, url=url
-                )
+                self.logger.exception("scraper.page_error", page=page_num, url=url)
+                consecutive_empty += 1
+                if consecutive_empty >= 3:
+                    break
             finally:
                 await page.close()
 
         return items
 
-    async def _scrape_search_page(
-        self,
-        page: Page,
-        url: str,
-        operation: str,
-        state: str = "",
-        page_num: int = 1,
+    async def _scrape_page_js(
+        self, page: Page, url: str, operation: str, state: str, page_num: int,
     ) -> list[ScrapedItem]:
-        """Scrape a single search results page.
+        """Scrape a page using JavaScript DOM evaluation — the approach that works."""
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-        Handles Azure WAF by waiting for card selector with generous timeout.
-        Retries once on 403/503 (WAF block).
-        """
-        response = await page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=config.PAGE_LOAD_TIMEOUT_MS,
-        )
-
-        if not response:
-            self.logger.warning("scraper.no_response", url=url)
+        if not response or response.status in (403, 503):
+            self.logger.warning("scraper.waf_block", url=url, status=response.status if response else None)
+            await asyncio.sleep(random.uniform(5, 10))
             return []
 
-        # Azure WAF block — retry once after delay
-        if response.status in (403, 503):
-            self.logger.warning(
-                "scraper.waf_block",
-                url=url,
-                status=response.status,
-                attempt=1,
-            )
-            await asyncio.sleep(random.uniform(8, 15))
-            response = await page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=config.PAGE_LOAD_TIMEOUT_MS,
-            )
-            if not response or response.status >= 400:
-                self.logger.warning(
-                    "scraper.waf_block_retry_failed",
-                    url=url,
-                    status=response.status if response else None,
-                )
-                return []
+        # Wait for cards to render
+        await asyncio.sleep(3)
 
-        # Wait for listing cards to render after WAF challenge
-        try:
-            await page.wait_for_selector(
-                config.SELECTORS["listing_card"],
-                timeout=config.CARD_WAIT_TIMEOUT_MS,
-            )
-        except Exception:
-            # Cards didn't appear — might be WAF challenge page or no results
-            self.logger.warning("scraper.no_cards_selector", url=url)
+        # Extract listings using JavaScript (from the working scraper)
+        raw_listings = await page.evaluate("""() => {
+            const items = document.querySelectorAll('.item-adaptive');
+            const results = [];
+            for (const item of items) {
+                const link = item.querySelector('a[href*="/vivienda/"]') || item.querySelector('a[href*="/listing/"]');
+                if (!link) continue;
+                const url = link.href.split('?')[0];
+                const priceEl = item.querySelector('.listing-price-main');
+                const titleEl = item.querySelector('.listing-title');
+                const locEl = item.querySelector('.item-location');
+                const hlEl = item.querySelector('.item-highlights');
+                const dataEl = item.querySelector('.item-data');
+                results.push({
+                    url: url,
+                    priceText: priceEl ? priceEl.textContent.trim() : '',
+                    title: titleEl ? titleEl.textContent.trim() : '',
+                    location: locEl ? locEl.textContent.trim() : '',
+                    highlights: hlEl ? hlEl.textContent.replace(/\\s+/g, ' ').trim() : '',
+                    dataText: dataEl ? dataEl.textContent.replace(/\\s+/g, ' ').trim() : '',
+                });
+            }
+            return results;
+        }""")
+
+        if not raw_listings:
             return []
 
-        # Log total results on first page
+        # Log total on first page
         if page_num == 1:
-            total = await get_total_results(page)
-            if total is not None:
+            total_text = await page.evaluate("""() => {
+                const h1 = document.querySelector('h1');
+                return h1 ? h1.textContent.trim() : '';
+            }""")
+            total_match = re.search(r"([\d.,]+)\s*resultado", total_text or "")
+            if total_match:
+                total = int(total_match.group(1).replace(".", "").replace(",", ""))
                 self.logger.info(
                     "scraper.total_results",
                     state=state,
                     operation=operation,
                     total=total,
-                    estimated_pages=(total + config.LISTINGS_PER_PAGE - 1) // config.LISTINGS_PER_PAGE,
                 )
 
-        partials = await parse_search_results(page)
-        if not partials:
-            return []
-
-        # Enrich with operation and state from search context
         state_name = _state_slug_to_name(state)
-        for p in partials:
-            p["operation"] = operation
-            p["state"] = state_name
-            p["country"] = "Mexico"
-
-        if not self.visit_detail:
-            return [self._partial_to_item(p) for p in partials]
-
-        # Visit detail pages for richer data
-        items: list[ScrapedItem] = []
-        for partial in partials:
-            detail_url = partial.get("detail_url")
-            if not detail_url:
-                items.append(self._partial_to_item(partial))
-                continue
-
-            detail_page = await page.context.new_page()
-            try:
-                await detail_page.goto(
-                    detail_url,
-                    wait_until="domcontentloaded",
-                    timeout=config.PAGE_LOAD_TIMEOUT_MS,
-                )
-                item = await parse_detail_page(detail_page, partial)
+        items = []
+        for raw in raw_listings:
+            item = _parse_raw_listing(raw, operation, state_name)
+            if item:
                 items.append(item)
-
-                await asyncio.sleep(
-                    random.uniform(
-                        config.REQUEST_DELAY_MIN_MS / 1000,
-                        config.REQUEST_DELAY_MAX_MS / 1000,
-                    )
-                )
-            except Exception:
-                self.stats["errors"] += 1
-                self.logger.exception("scraper.detail_error", url=detail_url)
-                items.append(self._partial_to_item(partial))
-            finally:
-                await detail_page.close()
 
         return items
 
     @staticmethod
     def _partial_to_item(p: dict) -> ScrapedItem:
-        """Convert a partial dict (from search card) to a ScrapedItem."""
         return ScrapedItem(
             external_id=p["external_id"],
             url_listing=p.get("url_listing"),
@@ -288,12 +240,104 @@ class PropertystarScraper(BaseScraper):
         )
 
 
-def _state_slug_to_name(slug: str) -> str:
-    """Convert URL slug to human-readable state name.
+def _parse_raw_listing(raw: dict, operation: str, state: str) -> ScrapedItem | None:
+    """Parse a raw JS-extracted listing into a ScrapedItem."""
+    url = raw.get("url", "")
+    if not url:
+        return None
 
-    Handles special cases like 'puebla-l1' → 'Puebla',
-    'coahuila-de-zaragoza' → 'Coahuila De Zaragoza'.
-    """
-    # Remove -l1 suffix (disambiguation suffix on Properstar)
+    # External ID from URL
+    match = re.search(r"/vivienda/(\d+)", url) or re.search(r"/listing/(\d+)", url)
+    if not match:
+        match = re.search(r"-(\d{5,})(?:\?|$|/)", url)
+    if not match:
+        return None
+    external_id = match.group(1)
+
+    # Price
+    price_text = raw.get("priceText", "")
+    price, currency = None, None
+    if price_text:
+        currency = "USD" if "USD" in price_text.upper() else "MXN"
+        digits = re.sub(r"[^\d.]", "", price_text.replace(",", "").replace(".", ""))
+        if digits:
+            try:
+                price = float(digits)
+            except ValueError:
+                pass
+
+    # Features from highlights
+    highlights = raw.get("highlights", "")
+    bedrooms = _extract_int(r"(\d+)\s*habitaci[oó]n", highlights)
+    bathrooms = _extract_int(r"(\d+)\s*ba[ñn]o", highlights)
+    area = _extract_float(r"([\d,.]+)\s*m[²2]", highlights)
+
+    # Property type from dataText
+    data_text = raw.get("dataText", "")
+    property_type = _detect_property_type(data_text)
+
+    # Location
+    location = raw.get("location", "")
+    city, neighborhood = _parse_location(location)
+
+    return ScrapedItem(
+        external_id=external_id,
+        url_listing=url,
+        title=raw.get("title"),
+        operation=operation,
+        property_type=property_type,
+        listing_type=operation,
+        price=price,
+        currency=currency,
+        neighborhood=neighborhood,
+        city=city,
+        state=state,
+        country="Mexico",
+        bedrooms=bedrooms,
+        bathrooms=bathrooms,
+        construction_m2=area,
+    )
+
+
+def _extract_int(pattern: str, text: str) -> int | None:
+    m = re.search(pattern, text, re.I)
+    return int(m.group(1)) if m else None
+
+
+def _extract_float(pattern: str, text: str) -> float | None:
+    m = re.search(pattern, text, re.I)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _detect_property_type(text: str) -> str | None:
+    text_lower = text.lower()
+    for keyword, ptype in [
+        ("casa independiente", "casa"), ("casa con terraza", "casa"), ("casa", "casa"),
+        ("villa", "casa"), ("townhouse", "casa"),
+        ("piso con terraza", "departamento"), ("piso", "departamento"),
+        ("penthouse", "departamento"), ("departamento", "departamento"),
+        ("apartamento", "departamento"), ("estudio", "departamento"), ("loft", "departamento"),
+        ("terreno", "terreno"), ("local", "local_comercial"),
+    ]:
+        if keyword in text_lower:
+            return ptype
+    return None
+
+
+def _parse_location(location: str) -> tuple[str | None, str | None]:
+    if not location:
+        return None, None
+    parts = [p.strip() for p in location.split(",")]
+    if len(parts) >= 2:
+        return parts[-1], parts[0]
+    return parts[0] if parts else None, None
+
+
+def _state_slug_to_name(slug: str) -> str:
     clean = slug.removesuffix("-l1")
     return clean.replace("-", " ").title()
