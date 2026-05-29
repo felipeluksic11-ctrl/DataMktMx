@@ -39,3 +39,8 @@ logs/
 
 # Claude Code credentials
 .claude/settings.local.json
+
+# IDE/agent local configs (per-machine, not shared)
+.agents/
+.claude/
+.kiro/
